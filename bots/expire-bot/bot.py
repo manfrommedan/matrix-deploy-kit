@@ -692,27 +692,29 @@ class ExpireBot:
         args = body[len(self.prefix):].strip().split()
         cmd = args[0].lower() if args else "help"
 
+        reply_to = event.event_id
+
         if cmd == "help":
-            await self._send(room.room_id, HELP_TEXT)
+            await self._send(room.room_id, HELP_TEXT, reply_to)
         elif cmd in ("status", "show"):
-            await self._cmd_status(room)
+            await self._cmd_status(room, reply_to)
         elif cmd == "set":
             if len(args) < 2:
-                await self._send(room.room_id, "Usage: `!expire set <duration>` (e.g. `7d`, `1h`, `10h 15m`)")
+                await self._send(room.room_id, "Usage: `!expire set <duration>` (e.g. `7d`, `1h`, `10h 15m`)", reply_to)
                 return
-            await self._cmd_set(room, event, " ".join(args[1:]))
+            await self._cmd_set(room, event, " ".join(args[1:]), reply_to)
         elif cmd == "off":
-            await self._cmd_off(room, event)
+            await self._cmd_off(room, event, reply_to)
         elif cmd == "clean":
-            await self._cmd_clean(room, event)
+            await self._cmd_clean(room, event, reply_to)
         elif parse_duration(cmd):
-            await self._cmd_set(room, event, " ".join(args))
+            await self._cmd_set(room, event, " ".join(args), reply_to)
         else:
-            await self._send(room.room_id, f"Unknown command: `{cmd}`. Try `!expire help`")
+            await self._send(room.room_id, f"Unknown command: `{cmd}`. Try `!expire help`", reply_to)
 
     # ─── Commands ─────────────────────────────────────────────────────────
 
-    async def _cmd_status(self, room: MatrixRoom):
+    async def _cmd_status(self, room: MatrixRoom, reply_to: str | None = None):
         info = await self.db.get_retention(room.room_id)
         can_redact = await self._can_redact(room)
 
@@ -727,13 +729,14 @@ class ExpireBot:
             status += f"**Permissions:** {'OK' if can_redact else 'MISSING — need power level 50+'}\n"
             status += "Use `!expire set <duration>` to enable."
 
-        await self._send(room.room_id, status)
+        await self._send(room.room_id, status, reply_to)
 
-    async def _cmd_set(self, room: MatrixRoom, event: RoomMessageText, duration_str: str):
+    async def _cmd_set(self, room: MatrixRoom, event: RoomMessageText, duration_str: str, reply_to: str | None = None):
         if not await self._has_power(room, event.sender):
             await self._send(
                 room.room_id,
                 f"Only room moderators (power level {self.min_power}+) can configure the bot.",
+                reply_to,
             )
             return
 
@@ -743,6 +746,7 @@ class ExpireBot:
                 room.room_id,
                 f"Can't parse `{duration_str}`. "
                 "Examples: `1h`, `7d`, `30d`, `10h 15m`, `1d 12h`. Minimum: `1m`.",
+                reply_to,
             )
             return
 
@@ -750,6 +754,7 @@ class ExpireBot:
             await self._send(
                 room.room_id,
                 f"Maximum retention period is **{format_duration(self.max_retention)}**.",
+                reply_to,
             )
             return
 
@@ -758,6 +763,7 @@ class ExpireBot:
                 room.room_id,
                 "I need **moderator** rights (power level 50+) to redact messages.\n"
                 "Please promote me first, then try again.",
+                reply_to,
             )
             return
 
@@ -768,6 +774,7 @@ class ExpireBot:
         await self._send(
             room.room_id,
             f"Retention set to **{dur}**.",
+            reply_to,
         )
         logger.info(f"Retention set: {room.room_id} → {dur} by {event.sender}")
         # Fire-and-forget: import + cleanup in background (don't block sync)
@@ -786,30 +793,32 @@ class ExpireBot:
         except Exception as e:
             logger.error(f"Background set cleanup failed for {room_id}: {e}")
 
-    async def _cmd_off(self, room: MatrixRoom, event: RoomMessageText):
+    async def _cmd_off(self, room: MatrixRoom, event: RoomMessageText, reply_to: str | None = None):
         if not await self._has_power(room, event.sender):
             await self._send(
                 room.room_id,
                 f"Only room moderators (power level {self.min_power}+) can configure the bot.",
+                reply_to,
             )
             return
 
         info = await self.db.get_retention(room.room_id)
         if not info:
-            await self._send(room.room_id, "Retention is already disabled for this room.")
+            await self._send(room.room_id, "Retention is already disabled for this room.", reply_to)
             return
 
         await self.db.remove_retention(room.room_id)
         await self.db.clear_scan_state(room.room_id)
         await self.db.clear_tracked_events(room.room_id)
-        await self._send(room.room_id, "Retention disabled. Messages will no longer be auto-deleted.")
+        await self._send(room.room_id, "Retention disabled. Messages will no longer be auto-deleted.", reply_to)
         logger.info(f"Retention disabled: {room.room_id} by {event.sender}")
 
-    async def _cmd_clean(self, room: MatrixRoom, event: RoomMessageText):
+    async def _cmd_clean(self, room: MatrixRoom, event: RoomMessageText, reply_to: str | None = None):
         if not await self._has_power(room, event.sender):
             await self._send(
                 room.room_id,
                 f"Only room moderators (power level {self.min_power}+) can run cleanup.",
+                reply_to,
             )
             return
 
@@ -817,15 +826,16 @@ class ExpireBot:
             await self._send(
                 room.room_id,
                 "I don't have redact permissions. Please set my power level to 50+.",
+                reply_to,
             )
             return
 
         # Only one clean at a time (across all rooms)
         if self._clean_lock.locked():
-            await self._send(room.room_id, "Cleanup is already running. Please wait.")
+            await self._send(room.room_id, "Cleanup is already running. Please wait.", reply_to)
             return
 
-        await self._send(room.room_id, "Starting cleanup...")
+        await self._send(room.room_id, "Starting cleanup...", reply_to)
         # Fire-and-forget: full clean in background (don't block sync)
         asyncio.create_task(self._bg_clean(room.room_id))
 
@@ -1139,18 +1149,23 @@ class ExpireBot:
 
     # ─── Helpers ──────────────────────────────────────────────────────────
 
-    async def _send(self, room_id: str, message: str) -> str | None:
+    async def _send(self, room_id: str, message: str, reply_to: str | None = None) -> str | None:
         """Send a markdown message to a room. Returns event_id."""
         try:
+            content = {
+                "msgtype": "m.notice",
+                "body": message,
+                "format": "org.matrix.custom.html",
+                "formatted_body": self._md_to_html(message),
+            }
+            if reply_to:
+                content["m.relates_to"] = {
+                    "m.in_reply_to": {"event_id": reply_to},
+                }
             resp = await self.client.room_send(
                 room_id,
                 "m.room.message",
-                {
-                    "msgtype": "m.notice",
-                    "body": message,
-                    "format": "org.matrix.custom.html",
-                    "formatted_body": self._md_to_html(message),
-                },
+                content,
             )
             if hasattr(resp, "event_id"):
                 return resp.event_id
