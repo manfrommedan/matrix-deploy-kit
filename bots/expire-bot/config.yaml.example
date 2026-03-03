@@ -1,0 +1,62 @@
+# Matrix Expire Bot — Configuration
+# Copy to config.yaml and fill in your values
+
+# Homeserver URL (without trailing slash)
+homeserver: "https://matrix.example.com"
+
+# Bot credentials (choose one method)
+user_id: "@expire-bot:example.com"
+password: "CHANGE_ME"
+# access_token: "syt_..."
+
+# ─── Retention ────────────────────────────────────────────────
+# Default retention for new rooms (set on first join)
+default_retention: "7d"
+
+# Maximum retention period users can set
+max_retention: "365d"
+
+# ─── Timings ─────────────────────────────────────────────────
+# How often to check for expired messages (seconds)
+cleanup_interval: 60
+
+# Sync poll timeout (ms) — lower = faster response to commands
+sync_timeout: 10000
+
+# Cooldown between commands per user (seconds)
+command_cooldown: 5
+
+# ─── Rate limits ─────────────────────────────────────────────
+# Max redactions per cleanup cycle
+max_redacts_per_run: 50
+
+# Max API requests per minute (token bucket)
+max_requests_per_minute: 60
+
+# Max messages to scan per room per cycle
+max_scan_per_room: 1000
+
+# ─── Permissions ─────────────────────────────────────────────
+# Minimum power level to configure the bot
+min_power_level: 50
+
+# Command prefix
+command_prefix: "!expire"
+
+# ─── Notifications ───────────────────────────────────────────
+# Report deleted message count after scheduled cleanup (true/false)
+notify_cleanup: false
+
+# ─── Paths ───────────────────────────────────────────────────
+# SQLite database path
+database: "/data/expire-bot.db"
+
+# Logging level (DEBUG, INFO, WARNING, ERROR)
+log_level: "INFO"
+
+# Store path for matrix-nio sync state
+store_path: "/data/store"
+
+# Bot avatar image (path inside container, mount from host)
+# Supported formats: PNG, JPG, GIF, WebP, SVG
+# avatar: "/data/avatar.png"

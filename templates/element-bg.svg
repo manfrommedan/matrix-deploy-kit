@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" style="stop-color:#0d1117"/>
+      <stop offset="100%" style="stop-color:#010409"/>
+    </radialGradient>
+    <radialGradient id="glow1" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#00ff41;stop-opacity:0.08"/>
+      <stop offset="100%" style="stop-color:#00ff41;stop-opacity:0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#00dd66;stop-opacity:0.05"/>
+      <stop offset="100%" style="stop-color:#00dd66;stop-opacity:0"/>
+    </radialGradient>
+    <filter id="blur">
+      <feGaussianBlur stdDeviation="1.5"/>
+    </filter>
+  </defs>
+
+  <!-- Dark background -->
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+
+  <!-- Ambient glow spots -->
+  <ellipse cx="300" cy="200" rx="400" ry="300" fill="url(#glow1)"/>
+  <ellipse cx="1600" cy="800" rx="500" ry="350" fill="url(#glow2)"/>
+  <ellipse cx="960" cy="540" rx="600" ry="400" fill="url(#glow1)"/>
+
+  <!-- Grid lines - horizontal -->
+  <g stroke="#00ff41" stroke-width="0.3" opacity="0.07">
+    <line x1="0" y1="108" x2="1920" y2="108"/>
+    <line x1="0" y1="216" x2="1920" y2="216"/>
+    <line x1="0" y1="324" x2="1920" y2="324"/>
+    <line x1="0" y1="432" x2="1920" y2="432"/>
+    <line x1="0" y1="540" x2="1920" y2="540"/>
+    <line x1="0" y1="648" x2="1920" y2="648"/>
+    <line x1="0" y1="756" x2="1920" y2="756"/>
+    <line x1="0" y1="864" x2="1920" y2="864"/>
+    <line x1="0" y1="972" x2="1920" y2="972"/>
+  </g>
+
+  <!-- Grid lines - vertical -->
+  <g stroke="#00ff41" stroke-width="0.3" opacity="0.07">
+    <line x1="192" y1="0" x2="192" y2="1080"/>
+    <line x1="384" y1="0" x2="384" y2="1080"/>
+    <line x1="576" y1="0" x2="576" y2="1080"/>
+    <line x1="768" y1="0" x2="768" y2="1080"/>
+    <line x1="960" y1="0" x2="960" y2="1080"/>
+    <line x1="1152" y1="0" x2="1152" y2="1080"/>
+    <line x1="1344" y1="0" x2="1344" y2="1080"/>
+    <line x1="1536" y1="0" x2="1536" y2="1080"/>
+    <line x1="1728" y1="0" x2="1728" y2="1080"/>
+  </g>
+
+  <!-- Network nodes and connections -->
+  <g filter="url(#blur)">
+    <!-- Connection lines -->
+    <g stroke="#00ff41" stroke-width="0.8" opacity="0.12">
+      <line x1="200" y1="150" x2="480" y2="300"/>
+      <line x1="480" y1="300" x2="750" y2="200"/>
+      <line x1="750" y1="200" x2="960" y2="380"/>
+      <line x1="960" y1="380" x2="1200" y2="280"/>
+      <line x1="1200" y1="280" x2="1500" y2="400"/>
+      <line x1="1500" y1="400" x2="1750" y2="300"/>
+
+      <line x1="150" y1="600" x2="400" y2="750"/>
+      <line x1="400" y1="750" x2="700" y2="650"/>
+      <line x1="700" y1="650" x2="960" y2="800"/>
+      <line x1="960" y1="800" x2="1250" y2="700"/>
+      <line x1="1250" y1="700" x2="1550" y2="850"/>
+      <line x1="1550" y1="850" x2="1800" y2="750"/>
+
+      <!-- Cross connections -->
+      <line x1="480" y1="300" x2="400" y2="750"/>
+      <line x1="750" y1="200" x2="700" y2="650"/>
+      <line x1="960" y1="380" x2="960" y2="800"/>
+      <line x1="1200" y1="280" x2="1250" y2="700"/>
+      <line x1="1500" y1="400" x2="1550" y2="850"/>
+
+      <!-- Diagonal accents -->
+      <line x1="200" y1="150" x2="150" y2="600"/>
+      <line x1="1750" y1="300" x2="1800" y2="750"/>
+    </g>
+
+    <!-- Nodes -->
+    <g fill="#00ff41">
+      <circle cx="200" cy="150" r="3" opacity="0.4"/>
+      <circle cx="480" cy="300" r="4" opacity="0.5"/>
+      <circle cx="750" cy="200" r="3" opacity="0.35"/>
+      <circle cx="960" cy="380" r="5" opacity="0.6"/>
+      <circle cx="1200" cy="280" r="3" opacity="0.4"/>
+      <circle cx="1500" cy="400" r="4" opacity="0.45"/>
+      <circle cx="1750" cy="300" r="3" opacity="0.35"/>
+
+      <circle cx="150" cy="600" r="3" opacity="0.35"/>
+      <circle cx="400" cy="750" r="4" opacity="0.45"/>
+      <circle cx="700" cy="650" r="3" opacity="0.4"/>
+      <circle cx="960" cy="800" r="5" opacity="0.55"/>
+      <circle cx="1250" cy="700" r="4" opacity="0.45"/>
+      <circle cx="1550" cy="850" r="3" opacity="0.4"/>
+      <circle cx="1800" cy="750" r="3" opacity="0.3"/>
+    </g>
+
+    <!-- Pulsing core nodes -->
+    <circle cx="960" cy="380" r="8" fill="none" stroke="#00ff41" stroke-width="1" opacity="0.15">
+      <animate attributeName="r" values="8;20;8" dur="4s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.15;0.03;0.15" dur="4s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="960" cy="800" r="8" fill="none" stroke="#00ff41" stroke-width="1" opacity="0.12">
+      <animate attributeName="r" values="8;18;8" dur="5s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.12;0.02;0.12" dur="5s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <!-- Floating hex fragments -->
+  <g font-family="'Courier New', monospace" font-size="10" fill="#00ff41" opacity="0.06">
+    <text x="50" y="50">4f 70 65 6e</text>
+    <text x="1650" y="100">53 6f 75 72 63 65</text>
+    <text x="100" y="950">45 32 45 45</text>
+    <text x="1500" y="980">44 65 63 65 6e 74</text>
+    <text x="800" y="30">00 ff 41</text>
+    <text x="300" y="1060">6d 61 74 72 69 78</text>
+    <text x="1200" y="50">70 72 6f 74 6f 63 6f 6c</text>
+    <text x="1750" y="540">76 6f 69 64</text>
+    <text x="30" y="400">65 6e 63 72 79 70 74</text>
+  </g>
+
+  <!-- Scanline effect -->
+  <rect width="1920" height="1080" fill="url(#bg)" opacity="0">
+    <animate attributeName="y" values="0;-2;0;1;0" dur="0.1s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- Subtle vignette -->
+  <rect width="1920" height="1080" fill="url(#bg)" opacity="0.3"/>
+</svg>
