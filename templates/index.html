@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrypoint</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:#0a0a0f;font-family:'Courier New',monospace;color:#00ff41}
+
+canvas#rain{position:fixed;top:0;left:0;z-index:0;opacity:.15}
+
+.overlay{position:relative;z-index:1;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}
+
+.logo-box{position:relative;padding:3rem 4rem;border:1px solid rgba(0,255,65,.15);background:rgba(10,10,15,.85);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);text-align:center;animation:fadeUp .8s ease-out}
+
+.logo-box::before,.logo-box::after{content:'';position:absolute;width:20px;height:20px;border-color:#00ff41;border-style:solid}
+.logo-box::before{top:-1px;left:-1px;border-width:2px 0 0 2px}
+.logo-box::after{bottom:-1px;right:-1px;border-width:0 2px 2px 0}
+
+.glitch{font-size:2.5rem;font-weight:700;letter-spacing:.3rem;text-transform:uppercase;position:relative;animation:glitch-skew 4s infinite linear alternate-reverse}
+.glitch::before,.glitch::after{content:attr(data-text);position:absolute;top:0;left:0;width:100%;height:100%;overflow:hidden}
+.glitch::before{color:#ff0040;z-index:-1;animation:glitch-1 3s infinite linear alternate-reverse;clip-path:inset(0 0 65% 0)}
+.glitch::after{color:#00d4ff;z-index:-2;animation:glitch-2 2.5s infinite linear alternate-reverse;clip-path:inset(35% 0 0 0)}
+
+.subtitle{margin-top:1.2rem;font-size:.85rem;color:rgba(0,255,65,.5);letter-spacing:.5rem;text-transform:uppercase}
+
+.prompt{margin-top:2.5rem;font-size:.75rem;color:rgba(0,255,65,.35);letter-spacing:.1rem}
+.cursor{display:inline-block;width:8px;height:14px;background:rgba(0,255,65,.6);margin-left:2px;animation:blink 1s step-end infinite;vertical-align:middle}
+
+.scanline{position:fixed;top:0;left:0;width:100%;height:100%;z-index:2;pointer-events:none;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px)}
+
+.flicker{animation:flicker 8s infinite}
+
+@keyframes fadeUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+@keyframes glitch-1{0%{transform:none}2%{transform:translate(-2px,1px)}4%{transform:none}40%{transform:none}42%{transform:translate(1px,-1px)}44%{transform:none}}
+@keyframes glitch-2{0%{transform:none}3%{transform:translate(2px,-1px)}5%{transform:none}50%{transform:none}52%{transform:translate(-1px,2px)}54%{transform:none}}
+@keyframes glitch-skew{0%{transform:skew(0deg)}2%{transform:skew(.5deg)}4%{transform:skew(0deg)}96%{transform:skew(0deg)}98%{transform:skew(-.3deg)}100%{transform:skew(0deg)}}
+@keyframes flicker{0%,100%{opacity:1}92%{opacity:1}93%{opacity:.8}94%{opacity:1}96%{opacity:1}97%{opacity:.9}98%{opacity:1}}
+
+@media(max-width:600px){.glitch{font-size:1.4rem;letter-spacing:.15rem}.logo-box{padding:2rem 2rem}.subtitle{letter-spacing:.2rem;font-size:.7rem}}
+</style>
+</head>
+<body>
+<canvas id="rain"></canvas>
+<div class="scanline"></div>
+
+<div class="overlay flicker">
+  <div class="logo-box">
+    <!-- Замени на название своего сервера -->
+    <div class="glitch" data-text="[ MATRIX ]">[ MATRIX ]</div>
+    <div class="subtitle">private node</div>
+    <div class="prompt">access restricted<span class="cursor"></span></div>
+  </div>
+</div>
+
+<script>
+const c=document.getElementById('rain'),x=c.getContext('2d');
+let w,h,cols,drops;
+const chars='01'.split('');
+
+function init(){
+  w=c.width=innerWidth;
+  h=c.height=innerHeight;
+  cols=Math.floor(w/18);
+  drops=Array(cols).fill(1);
+}
+
+function draw(){
+  x.fillStyle='rgba(10,10,15,.06)';
+  x.fillRect(0,0,w,h);
+  x.fillStyle='#00ff41';
+  x.font='14px monospace';
+  for(let i=0;i<cols;i++){
+    const t=chars[Math.floor(Math.random()*chars.length)];
+    x.fillText(t,i*18,drops[i]*18);
+    if(drops[i]*18>h&&Math.random()>.975)drops[i]=0;
+    drops[i]++;
+  }
+}
+
+init();
+addEventListener('resize',init);
+setInterval(draw,50);
+</script>
+</body>
+</html>
