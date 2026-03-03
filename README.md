@@ -120,6 +120,3 @@ ntfy.example.com           → IP   (--with-ntfy)
 - 2+ GB RAM (4+ рекомендуется)
 - Домен с настроенными DNS записями
 - Открытые порты: 80, 443, 8448
-# matrix-deploy-kit
-# matrix-deploy-kit
-# matrix-deploy-kit
