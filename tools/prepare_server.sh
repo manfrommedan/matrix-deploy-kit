@@ -20,7 +20,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 log()  { echo -e "${GREEN}[+]${NC} $*"; }
-warn() { echo -e "${YELLOW}[!]${NC} $*"; }
+warn() { echo -e "${YELLOW}[!]${NC} $*" >&2; }
 err()  { echo -e "${RED}[x]${NC} $*" >&2; }
 info() { echo -e "${BLUE}[i]${NC} $*"; }
 
@@ -55,6 +55,7 @@ COTURN_STUN_PORT=""
 COTURN_TURNS_PORT=""
 COTURN_RELAY_RANGE=""
 FEDERATION_ON_443=false
+TLS13_ONLY=false
 
 # --- Справка ---
 usage() {
@@ -86,6 +87,7 @@ Reverse proxy (выбрать один):
   --coturn-turns PORT       Coturn TURNS порт (по умолчанию: 5349)
   --coturn-relay-range MIN:MAX  Coturn relay UDP диапазон (по умолчанию: 49152:49172)
   --federation-on-443       Федерация на 443 (не открывать 8448, не генерировать nginx-блок)
+  --tls13-only              Принудительно TLS 1.3 (ssl_protocols TLSv1.3 во всех блоках)
 
 Общие опции:
   --deploy-user USER        Имя deploy-пользователя (по умолчанию: matrix-admin)
@@ -137,6 +139,7 @@ while [[ $# -gt 0 ]]; do
         --coturn-turns)       COTURN_TURNS_PORT="$2"; shift 2 ;;
         --coturn-relay-range) COTURN_RELAY_RANGE="$2"; shift 2 ;;
         --federation-on-443)  FEDERATION_ON_443=true; shift ;;
+        --tls13-only)         TLS13_ONLY=true; shift ;;
         --dry-run)          DRY_RUN=true; shift ;;
         -h|--help)          usage ;;
         *)                  err "Неизвестный параметр: $1"; usage ;;
@@ -721,6 +724,13 @@ NGINX_CONF="/etc/nginx/sites-available/matrix.conf"
 
 # Общий блок проксирования в Traefik
 # shellcheck disable=SC2120
+# Вставка ssl_protocols TLSv1.3 если --tls13-only
+_ssl_extra() {
+    if [[ "$TLS13_ONLY" == true ]]; then
+        echo "    ssl_protocols TLSv1.3;"
+    fi
+}
+
 _proxy_block() {
     local host_header="${1:-\$host}"
     cat <<PROXYBLOCK
@@ -848,6 +858,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+$(_ssl_extra)
 
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options DENY always;
@@ -897,6 +908,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+$(_ssl_extra)
 
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options SAMEORIGIN always;
@@ -949,6 +961,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+$(_ssl_extra)
 
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options SAMEORIGIN always;
@@ -980,6 +993,7 @@ ${_SN_SERVICES}
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+$(_ssl_extra)
 
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options SAMEORIGIN always;
@@ -1021,6 +1035,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+$(_ssl_extra)
 
     location / {
         proxy_pass http://127.0.0.1:8449;
@@ -1038,6 +1053,12 @@ server {
         proxy_hide_header Referrer-Policy;
 
         client_max_body_size 100M;
+    }
+
+    error_page 502 503 504 /error.html;
+    location = /error.html {
+        internal;
+        root /var/www/matrix-landing;
     }
 }
 NGINXEOF
@@ -1077,6 +1098,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+$(_ssl_extra)
 
     proxy_hide_header X-Powered-By;
     proxy_hide_header Server;
@@ -1120,6 +1142,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+$(_ssl_extra)
 
     proxy_hide_header X-Powered-By;
     proxy_hide_header Server;
