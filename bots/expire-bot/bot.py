@@ -1440,6 +1440,8 @@ async def main():
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    # Suppress noisy nio internal warnings (malformed events from server etc.)
+    logging.getLogger("nio").setLevel(logging.ERROR)
 
     logger.info(f"Starting Expire Bot as {config['user_id']}")
     logger.info(f"Homeserver: {config['homeserver']}")
