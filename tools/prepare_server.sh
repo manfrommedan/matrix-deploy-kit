@@ -642,6 +642,20 @@ elif [[ -n "$CERT_PATH" ]]; then
         --email "${CERTBOT_EMAIL}" \
         "${CERTBOT_DOMAIN_ARGS[@]}"; then
         log "Сертификаты получены"
+        # Переключаем renewal на webroot (standalone не работает пока nginx запущен)
+        _renewal_conf="/etc/letsencrypt/renewal/${DOMAIN}.conf"
+        if [[ -f "$_renewal_conf" ]]; then
+            sed -i 's/^authenticator = standalone$/authenticator = webroot/' "$_renewal_conf"
+            if ! grep -q '^\[\[webroot\]\]' "$_renewal_conf"; then
+                {
+                    echo "[[webroot]]"
+                    for d in "${CERT_DOMAINS[@]}"; do
+                        echo "${d} = /var/www/certbot"
+                    done
+                } >> "$_renewal_conf"
+            fi
+            log "Certbot renewal переключен на webroot"
+        fi
     else
         err "Не удалось получить сертификаты."
         err "После настройки DNS запусти вручную:"
@@ -751,6 +765,7 @@ _proxy_block() {
         proxy_hide_header X-XSS-Protection;
         proxy_hide_header Content-Security-Policy;
         proxy_hide_header Referrer-Policy;
+        proxy_hide_header Strict-Transport-Security;
 
         client_max_body_size 100M;
 
@@ -865,6 +880,7 @@ $(_ssl_extra)
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Content-Security-Policy "frame-ancestors 'none'" always;
     add_header Referrer-Policy no-referrer always;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
 
     root /var/www/html;
     index index.html index.nginx-debian.html;
@@ -876,6 +892,9 @@ $(_ssl_extra)
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$remote_addr;
         proxy_set_header X-Forwarded-Proto https;
+
+        proxy_http_version 1.1;
+
         proxy_hide_header X-Powered-By;
         proxy_hide_header Server;
         proxy_hide_header X-Frame-Options;
@@ -883,6 +902,7 @@ $(_ssl_extra)
         proxy_hide_header X-XSS-Protection;
         proxy_hide_header Content-Security-Policy;
         proxy_hide_header Referrer-Policy;
+        proxy_hide_header Strict-Transport-Security;
     }
 
     error_page 502 503 504 /error.html;
@@ -915,12 +935,19 @@ $(_ssl_extra)
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Content-Security-Policy "frame-ancestors 'self'" always;
     add_header Referrer-Policy no-referrer always;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
 
     # Landing page на корне
     location = / {
         root /var/www/matrix-landing;
         try_files /index.html =404;
         add_header Cache-Control "no-cache, no-store";
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-Frame-Options SAMEORIGIN always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Content-Security-Policy "frame-ancestors 'self'" always;
+        add_header Referrer-Policy no-referrer always;
+        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
     }
 
     # Terms of Service
@@ -928,6 +955,12 @@ $(_ssl_extra)
         root /var/www/matrix-landing;
         try_files /tos.html =404;
         add_header Cache-Control "no-cache, no-store";
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-Frame-Options SAMEORIGIN always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Content-Security-Policy "frame-ancestors 'self'" always;
+        add_header Referrer-Policy no-referrer always;
+        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
     }
 
     # Branding assets (логотип, фон)
@@ -935,6 +968,12 @@ $(_ssl_extra)
         root /var/www/matrix-landing;
         expires 1h;
         add_header Cache-Control "public, no-transform";
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-Frame-Options SAMEORIGIN always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Content-Security-Policy "frame-ancestors 'self'" always;
+        add_header Referrer-Policy no-referrer always;
+        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
     }
 
     # Всё остальное — в Traefik
@@ -968,6 +1007,7 @@ $(_ssl_extra)
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Content-Security-Policy "frame-ancestors 'self'" always;
     add_header Referrer-Policy no-referrer always;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
 
     location / {
 $(_proxy_block)
@@ -1000,12 +1040,19 @@ $(_ssl_extra)
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Content-Security-Policy "frame-ancestors 'self'" always;
     add_header Referrer-Policy no-referrer always;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
 
     # Branding assets (логотип, фон)
     location /branding/ {
         root /var/www/matrix-landing;
         expires 1h;
         add_header Cache-Control "public, no-transform";
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-Frame-Options SAMEORIGIN always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Content-Security-Policy "frame-ancestors 'self'" always;
+        add_header Referrer-Policy no-referrer always;
+        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
     }
 
     location / {
@@ -1044,6 +1091,8 @@ $(_ssl_extra)
         proxy_set_header X-Forwarded-For \$remote_addr;
         proxy_set_header X-Forwarded-Proto \$scheme;
 
+        proxy_http_version 1.1;
+
         proxy_hide_header X-Powered-By;
         proxy_hide_header Server;
         proxy_hide_header X-Frame-Options;
@@ -1051,6 +1100,7 @@ $(_ssl_extra)
         proxy_hide_header X-XSS-Protection;
         proxy_hide_header Content-Security-Policy;
         proxy_hide_header Referrer-Policy;
+        proxy_hide_header Strict-Transport-Security;
 
         client_max_body_size 100M;
     }
@@ -1107,6 +1157,14 @@ $(_ssl_extra)
     proxy_hide_header X-XSS-Protection;
     proxy_hide_header Content-Security-Policy;
     proxy_hide_header Referrer-Policy;
+    proxy_hide_header Strict-Transport-Security;
+
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Content-Security-Policy "frame-ancestors 'self'" always;
+    add_header Referrer-Policy no-referrer always;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
 
     location / {
         proxy_pass http://127.0.0.1:81;
@@ -1151,6 +1209,14 @@ $(_ssl_extra)
     proxy_hide_header X-XSS-Protection;
     proxy_hide_header Content-Security-Policy;
     proxy_hide_header Referrer-Policy;
+    proxy_hide_header Strict-Transport-Security;
+
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Content-Security-Policy "frame-ancestors 'self'" always;
+    add_header Referrer-Policy no-referrer always;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
 
     location / {
         proxy_pass http://127.0.0.1:81;
