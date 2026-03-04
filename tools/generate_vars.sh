@@ -1196,6 +1196,11 @@ traefik_certs_dumper_enabled: false
 # Traefik слушает только на localhost
 traefik_container_web_host_bind_port: '127.0.0.1:81'
 traefik_config_entrypoint_web_forwardedHeaders_insecure: true
+VARSEOF
+
+# Federation entrypoint: при federation на 443 — не нужен отдельный порт 8449
+if [[ "$FED_ON_443" != true ]]; then
+cat >> "$OUTPUT_FILE" <<VARSEOF
 
 # Federation entrypoint
 matrix_playbook_public_matrix_federation_api_traefik_entrypoint_host_bind_port: '127.0.0.1:8449'
@@ -1204,6 +1209,7 @@ matrix_playbook_public_matrix_federation_api_traefik_entrypoint_config_custom:
   forwardedHeaders:
     insecure: true
 VARSEOF
+fi
 else
 cat >> "$OUTPUT_FILE" <<VARSEOF
 
@@ -1940,6 +1946,12 @@ fi
 
 # Federation на порт 443
 if [[ "$FED_ON_443" == true ]]; then
+    # nginx: federation через web entrypoint; Traefik-only: через web-secure
+    if [[ "$USE_NGINX" == true ]]; then
+        FED_ENTRYPOINT="web"
+    else
+        FED_ENTRYPOINT="web-secure"
+    fi
 cat >> "$OUTPUT_FILE" <<VARSEOF
 
 # Federation на порт 443 (маскировка под обычный HTTPS)
@@ -1947,6 +1959,10 @@ matrix_synapse_http_listener_resource_names: ["client","federation"]
 matrix_federation_public_port: 443
 matrix_synapse_federation_port_enabled: false
 matrix_synapse_tls_federation_listener_enabled: false
+
+# Все federation-роутеры (включая media-repo) через entrypoint ${FED_ENTRYPOINT}
+# (entrypoint matrix-federation не существует при federation на 443)
+matrix_federation_traefik_entrypoint_name: ${FED_ENTRYPOINT}
 VARSEOF
 fi
 
