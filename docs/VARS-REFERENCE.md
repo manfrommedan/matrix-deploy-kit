@@ -1,7 +1,7 @@
 # Matrix Server — Справочник параметров vars.yml
 
 Этот файл описывает **все параметры**, которые можно настроить в `vars.yml`.
-Генератор `generate-vars.sh` создаёт этот файл автоматически, но ты можешь
+Генератор `generate_vars.sh` создаёт этот файл автоматически, но ты можешь
 редактировать его вручную.
 
 > **Путь к файлу**: `inventory/host_vars/matrix.<domain>/vars.yml`
@@ -122,6 +122,10 @@ matrix_synapse_http_listener_resource_names: ["client","federation"]
 matrix_federation_public_port: 443
 matrix_synapse_federation_port_enabled: false
 matrix_synapse_tls_federation_listener_enabled: false
+
+# ОБЯЗАТЕЛЬНО: entrypoint matrix-federation не существует при federation на 443
+# nginx+Traefik: web / Traefik-only: web-secure
+matrix_federation_traefik_entrypoint_name: web
 ```
 
 ---
@@ -196,22 +200,59 @@ matrix_client_element_registration_enabled: true
 ## 9. Звонки (LiveKit)
 
 ```yaml
-# Аудио/видео звонки через Element Web
-# LiveKit SFU (медиа-сервер) запускается автоматически
+# ГЛАВНЫЙ ПЕРЕКЛЮЧАТЕЛЬ — включает весь RTC-стек:
+# LiveKit SFU → JWT-сервис → .well-known/matrix/client (rtc_foci)
+matrix_rtc_enabled: true
+
+# Кнопка звонков в Element Web (просто флаг в config.json, не отдельный сервис)
+matrix_client_element_element_call_enabled: true
+
+# Element Call Frontend — отдельная веб-страница для звонков
+# НЕ нужна для звонков из Element Web/X (клиенты имеют встроенную поддержку)
 matrix_element_call_enabled: false
 
-# Порты LiveKit (можно рандомизировать для защиты от сканирования)
+# Порты LiveKit RTC (можно рандомизировать для защиты от сканирования)
 livekit_server_container_rtc_tcp_bind_port: 7881    # ICE/TCP
 livekit_server_container_rtc_udp_bind_port: 7882    # ICE/UDP
-
-# Порты TURN в LiveKit
-livekit_server_turn_tls_port: 5349   # TURN/TLS
-livekit_server_turn_udp_port: 3478   # TURN/UDP
 ```
 
-> **Примечание**: Element Call Frontend (`matrix_element_call_enabled`) — это
-> отдельная веб-страница для звонков. Звонки из Element Web работают через
-> LiveKit без неё.
+### LiveKit TURN TLS (nginx+Traefik режим)
+
+В nginx+Traefik режиме Traefik не управляет ACME-сертификатами — LiveKit нужны
+свои TLS-серты. `prepare_server.sh` копирует certbot-серты автоматически.
+
+```yaml
+# Встроенный TURN в LiveKit (терминирует TLS сам)
+livekit_server_config_turn_enabled: true
+livekit_server_config_turn_external_tls: false
+livekit_server_config_turn_cert_file: /certs/fullchain.pem
+livekit_server_config_turn_key_file: /certs/privkey.pem
+
+# Монтирование сертов в контейнер
+livekit_server_container_additional_volumes_custom:
+  - src: /var/matrix/livekit-server/certs
+    dst: /certs
+    options: ro
+
+# Порты TURN в LiveKit (рандомизация)
+livekit_server_config_turn_tls_port: 15990     # TURN/TLS
+livekit_server_config_turn_udp_port: 13478     # TURN/UDP
+```
+
+### LiveKit тюнинг
+
+```yaml
+livekit_server_configuration_extension_yaml: |
+  room:
+    empty_timeout: 30
+    departure_timeout: 30
+    enabled_codecs:
+      - mime: audio/opus
+      - mime: video/vp8
+```
+
+> **ВАЖНО**: После рандомизации TURN-портов нужно запустить `setup-traefik` тег,
+> чтобы убрать порт из Traefik entrypoints (конфликт портов).
 
 ---
 
@@ -228,7 +269,7 @@ matrix_synapse_admin_enabled: true
 matrix_synapse_admin_path: /my-secret-admin
 
 # В nginx-режиме: вынести на отдельный порт
-# (настраивается через prepare-server.sh --synapse-admin-port PORT)
+# (настраивается через prepare_server.sh --synapse-admin-port PORT)
 ```
 
 #### Доступ по внутреннему имени (nginx → Traefik)
@@ -262,6 +303,7 @@ matrix_client_element_admin_container_labels_traefik_hostname: element-admin.int
 ## 12. Coturn (TURN/STUN)
 
 Помогает установить звонки через NAT и файрвол. **Без него звонки могут не работать**.
+Coturn — общий TURN для legacy VoIP, LiveKit TURN — для SFU-connectivity (разные сервисы).
 
 ```yaml
 # Включить Coturn
@@ -270,18 +312,57 @@ coturn_enabled: true
 # ОБЯЗАТЕЛЬНО: публичный IP твоего сервера
 matrix_coturn_turn_external_ip_address: '1.2.3.4'
 
-# Порты (стандартные)
-matrix_coturn_turn_udp_port: 3478
-matrix_coturn_turn_tls_port: 5349
+# Порты STUN/TURN (стандартные)
+coturn_container_stun_plain_host_bind_port_tcp: 3478
+coturn_container_stun_plain_host_bind_port_udp: 3478
+coturn_container_stun_tls_host_bind_port_tcp: 5349
+coturn_container_stun_tls_host_bind_port_udp: 5349
 
 # Рандомизация портов (защита от сканирования)
-matrix_coturn_turn_udp_port: 27483
-matrix_coturn_turn_tls_port: 39521
+coturn_container_stun_plain_host_bind_port_tcp: 19563
+coturn_container_stun_plain_host_bind_port_udp: 19563
+coturn_container_stun_tls_host_bind_port_tcp: 37782
+coturn_container_stun_tls_host_bind_port_udp: 37782
 
 # Relay диапазон UDP
 matrix_coturn_container_stun_relay_min_port: 49152
 matrix_coturn_container_stun_relay_max_port: 49172
 ```
+
+### Coturn TLS (nginx+Traefik режим)
+
+В nginx+Traefik режиме Traefik не даёт серты через ACME. `prepare_server.sh`
+автоматически копирует certbot-серты и создаёт renewal-хук.
+
+```yaml
+# Пути к сертам ВНУТРИ контейнера
+coturn_tls_cert_path: /certs/fullchain.pem
+coturn_tls_key_path: /certs/privkey.pem
+
+# Монтирование сертов (ВАЖНО: использовать coturn_container_additional_volumes,
+# НЕ _custom — group_vars перезаписывает combined переменную напрямую!)
+coturn_container_additional_volumes:
+  - src: /var/matrix/coturn/certs
+    dst: /certs
+    options: ro
+```
+
+### TURN URIs с кастомными портами
+
+Плейбук **не добавляет** номера портов в TURN URIs автоматически. При использовании
+нестандартных портов нужно явно переопределить `matrix_synapse_turn_uris`:
+
+```yaml
+# Пример: STUN на 19563, TURNS на 37782
+matrix_synapse_turn_uris:
+  - 'turns:matrix.example.com:37782?transport=udp'
+  - 'turns:matrix.example.com:37782?transport=tcp'
+  - 'turn:matrix.example.com:19563?transport=udp'
+  - 'turn:matrix.example.com:19563?transport=tcp'
+```
+
+> **Стандартные порты** (3478/5349) не требуют переопределения URI — клиенты
+> используют их по умолчанию.
 
 ---
 
@@ -592,6 +673,7 @@ matrix_synapse_auto_join_mxid_localpart: bot.welcome
 matrix_synapse_http_listener_resource_names: ["client","federation"]
 matrix_federation_public_port: 443
 matrix_synapse_federation_port_enabled: false
+matrix_federation_traefik_entrypoint_name: web  # nginx / web-secure для Traefik-only
 
 # Рандомизация портов LiveKit и Coturn
 livekit_server_container_rtc_tcp_bind_port: 27483
