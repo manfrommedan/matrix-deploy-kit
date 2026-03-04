@@ -735,6 +735,12 @@ class ExpireBot:
     async def _nuke_e2e_and_restart(self):
         """Delete E2E store and exit. Docker restart will re-login with fresh device."""
         import shutil
+        # Reset scan state so history gets re-imported after restart
+        try:
+            await self.db.db.execute("UPDATE room_scan_state SET fully_cleaned = 0")
+            await self.db.db.commit()
+        except Exception:
+            pass
         try:
             await self.db.close()
         except Exception:
