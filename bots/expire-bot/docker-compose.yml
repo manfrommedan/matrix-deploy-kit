@@ -20,6 +20,12 @@ services:
       # - EXPIRE_BOT_LOG_LEVEL=INFO
       # - EXPIRE_BOT_AVATAR=/data/avatar.png
       # - EXPIRE_BOT_NOTIFY_CLEANUP=true
+      #
+      # Who can manage the bot and invite it to rooms.
+      # "all" (default) = anyone with power level 50+
+      # Comma-separated list = only matching users, supports glob: @*:server
+      # Invites from non-matching users are rejected automatically.
+      # - EXPIRE_BOT_ADMINS=@*:matrix.example.com,@admin:other.server
     # networks:
     #   - matrix
     # Uncomment if your homeserver is on a docker network:
