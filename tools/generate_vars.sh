@@ -219,6 +219,12 @@ ask_multi() {
 }
 
 # Генерация секрета
+# Экранирование одинарных кавычек для YAML single-quoted строк
+# "Don't stop" → "Don''t stop"
+yaml_sq() {
+    echo "${1//\'/\'\'}"
+}
+
 gen_secret() {
     local len="${1:-64}"
     if command -v pwgen &>/dev/null; then
@@ -768,8 +774,8 @@ if ask_yn "Настроить брендинг (логотип, фон, welcome-
     ELEMENT_BG_URL=$(ask "URL фоновой картинки (SVG/PNG, пусто = без фона)" "")
 
     echo ""
-    ELEMENT_HEADLINE=$(ask "Headline на странице входа" "")
-    ELEMENT_SUBTITLE=$(ask "Подзаголовок" "")
+    ELEMENT_HEADLINE=$(yaml_sq "$(ask "Headline на странице входа" "")")
+    ELEMENT_SUBTITLE=$(yaml_sq "$(ask "Подзаголовок" "")")
 
     echo ""
     if ask_yn "Добавить ссылки внизу страницы входа (ToS, Status)?" "n"; then
@@ -895,7 +901,7 @@ if ask_yn "Настроить отправку email?" "n"; then
     SMTP_HOST=$(ask "SMTP хост" "smtp.example.com")
     SMTP_PORT=$(ask_port "SMTP порт" "587")
     SMTP_USER=$(ask "SMTP пользователь" "")
-    SMTP_PASS=$(ask_secret "SMTP пароль" "")
+    SMTP_PASS=$(yaml_sq "$(ask_secret "SMTP пароль" "")")
     SMTP_FROM=$(ask "Email отправителя" "matrix@${DOMAIN}")
 fi
 
@@ -1069,16 +1075,21 @@ CF_EMAIL=""
 CF_ZONE_TOKEN=""
 CF_DNS_TOKEN=""
 
-info "${BOLD}Cloudflare proxy${NC} — скрывает реальный IP сервера"
-info "Защита от DDoS, кеширование, маскировка от сканеров"
-info "Требует: домен на Cloudflare, API-токены для DNS challenge"
-echo ""
+if [[ "$USE_NGINX" == true ]]; then
+    info "${DIM}Cloudflare DNS challenge — только для Traefik-only режима${NC}"
+    info "${DIM}В nginx режиме SSL управляется certbot (уже настроен)${NC}"
+else
+    info "${BOLD}Cloudflare proxy${NC} — скрывает реальный IP сервера"
+    info "Защита от DDoS, кеширование, маскировка от сканеров"
+    info "Требует: домен на Cloudflare, API-токены для DNS challenge"
+    echo ""
 
-if ask_yn "Настроить Cloudflare DNS challenge (для SSL-сертификатов)?" "n"; then
-    CLOUDFLARE_ENABLED=true
-    CF_EMAIL=$(ask "Cloudflare email" "")
-    CF_ZONE_TOKEN=$(ask_secret "CF_ZONE_API_TOKEN" "")
-    CF_DNS_TOKEN=$(ask_secret "CF_DNS_API_TOKEN" "")
+    if ask_yn "Настроить Cloudflare DNS challenge (для SSL-сертификатов)?" "n"; then
+        CLOUDFLARE_ENABLED=true
+        CF_EMAIL=$(ask "Cloudflare email" "")
+        CF_ZONE_TOKEN=$(ask_secret "CF_ZONE_API_TOKEN" "")
+        CF_DNS_TOKEN=$(ask_secret "CF_DNS_API_TOKEN" "")
+    fi
 fi
 
 
@@ -1155,7 +1166,7 @@ if [[ "$DATA_PATH" != "/matrix" ]]; then
 cat >> "$OUTPUT_FILE" <<VARSEOF
 
 # Кастомный путь хранения данных (по умолчанию /matrix)
-matrix_base_data_path: ${DATA_PATH}
+matrix_base_data_path: '${DATA_PATH}'
 VARSEOF
 else
 cat >> "$OUTPUT_FILE" <<VARSEOF
@@ -1659,8 +1670,7 @@ coturn_turn_udp_min_port: ${COTURN_RELAY_MIN}
 coturn_turn_udp_max_port: ${COTURN_RELAY_MAX}
 VARSEOF
 
-# nginx+Traefik + кастомные порты → TURN URIs с портами
-if [[ "$USE_NGINX" == true ]]; then
+# Кастомные порты → TURN URIs с портами (плейбук не добавляет порты автоматически)
 cat >> "$OUTPUT_FILE" <<VARSEOF
 
 # TURN URIs с нестандартными портами (плейбук не добавляет порты автоматически)
@@ -1670,7 +1680,6 @@ matrix_synapse_turn_uris:
   - 'turn:matrix.${DOMAIN}:${COTURN_STUN_PORT}?transport=udp'
   - 'turn:matrix.${DOMAIN}:${COTURN_STUN_PORT}?transport=tcp'
 VARSEOF
-fi
 
 fi
 
@@ -2244,6 +2253,12 @@ if [[ "$DRY_RUN" != true ]]; then
             [[ -n "$SYNAPSE_ADMIN_PORT" ]] && _prepare_cmd="${_prepare_cmd} --synapse-admin-port ${SYNAPSE_ADMIN_PORT}"
             [[ -n "$ELEMENT_ADMIN_PORT" ]] && _prepare_cmd="${_prepare_cmd} --element-admin-port ${ELEMENT_ADMIN_PORT}"
             [[ "$NTFY" == true ]] && _prepare_cmd="${_prepare_cmd} --with-ntfy"
+            [[ "$FED_ON_443" == true ]] && _prepare_cmd="${_prepare_cmd} --federation-on-443"
+            [[ "$TLS13_ONLY" == true ]] && _prepare_cmd="${_prepare_cmd} --tls13-only"
+            [[ "$DATA_PATH" != "/matrix" ]] && _prepare_cmd="${_prepare_cmd} --data-path ${DATA_PATH}"
+            [[ "$LIVEKIT_RANDOMIZE_PORTS" == true ]] && _prepare_cmd="${_prepare_cmd} --livekit-turn-tls ${LIVEKIT_TURN_TLS} --livekit-turn-udp ${LIVEKIT_TURN_UDP}"
+            [[ "$RANDOMIZE_COTURN_PORTS" == true ]] && _prepare_cmd="${_prepare_cmd} --coturn-stun ${COTURN_STUN_PORT} --coturn-turns ${COTURN_TURNS_PORT}"
+            _prepare_cmd="${_prepare_cmd} --with-landing-page"
             echo "    2. Подготовь сервер:"
             echo "         ${_prepare_cmd}"
             echo "    3. Запусти деплой:"
@@ -2274,9 +2289,18 @@ if [[ "$DRY_RUN" != true ]]; then
             _prepare_cmd_r="bash prepare_server.sh --domain ${DOMAIN}"
             [[ -n "$SYNAPSE_ADMIN_PORT" ]] && _prepare_cmd_r="${_prepare_cmd_r} --synapse-admin-port ${SYNAPSE_ADMIN_PORT}"
             [[ -n "$ELEMENT_ADMIN_PORT" ]] && _prepare_cmd_r="${_prepare_cmd_r} --element-admin-port ${ELEMENT_ADMIN_PORT}"
+            [[ "$NTFY" == true ]] && _prepare_cmd_r="${_prepare_cmd_r} --with-ntfy"
+            [[ "$FED_ON_443" == true ]] && _prepare_cmd_r="${_prepare_cmd_r} --federation-on-443"
+            [[ "$TLS13_ONLY" == true ]] && _prepare_cmd_r="${_prepare_cmd_r} --tls13-only"
+            [[ "$DATA_PATH" != "/matrix" ]] && _prepare_cmd_r="${_prepare_cmd_r} --data-path ${DATA_PATH}"
+            [[ "$LIVEKIT_RANDOMIZE_PORTS" == true ]] && _prepare_cmd_r="${_prepare_cmd_r} --livekit-turn-tls ${LIVEKIT_TURN_TLS} --livekit-turn-udp ${LIVEKIT_TURN_UDP}"
+            [[ "$RANDOMIZE_COTURN_PORTS" == true ]] && _prepare_cmd_r="${_prepare_cmd_r} --coturn-stun ${COTURN_STUN_PORT} --coturn-turns ${COTURN_TURNS_PORT}"
+            _prepare_cmd_r="${_prepare_cmd_r} --with-landing-page"
             echo "    2. На сервере: ${_prepare_cmd_r}"
         else
-            echo "    2. На сервере: bash prepare_server.sh --domain ${DOMAIN} --traefik-only"
+            _prepare_cmd_r="bash prepare_server.sh --domain ${DOMAIN} --traefik-only"
+            [[ "$NTFY" == true ]] && _prepare_cmd_r="${_prepare_cmd_r} --with-ntfy"
+            echo "    2. На сервере: ${_prepare_cmd_r}"
         fi
         echo "    3. На управляющей машине:"
         echo "         cd ${PLAYBOOK_ROOT}"
