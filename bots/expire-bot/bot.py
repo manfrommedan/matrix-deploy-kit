@@ -147,14 +147,14 @@ def format_duration(seconds: int) -> str:
 
 # ─── Help text ────────────────────────────────────────────────────────────────
 
-HELP_TEXT = """**Expire Bot** — auto-delete old messages
+HELP_TEMPLATE = """**Expire Bot** — auto-delete old messages
 
 **Commands:**
-• `!expire set <duration>` — set retention (e.g. `1h`, `7d`, `30d`)
-• `!expire off` — disable retention for this room
-• `!expire status` / `!expire show` — current setting
-• `!expire clean` — force cleanup now
-• `!expire help` — this message
+• `{p} set <duration>` — set retention (e.g. `1h`, `7d`, `30d`)
+• `{p} off` / `{p} unset` — disable retention for this room
+• `{p} status` / `{p} show` — current setting
+• `{p} clean` — force cleanup now
+• `{p} help` — this message
 
 **Durations:** `30m`, `1h`, `6h`, `1d`, `7d`, `30d`, `1y`, `10h 15m`, `1d 12h`
 
@@ -220,6 +220,14 @@ class Database:
             "ON tracked_events (room_id, timestamp_ms)"
         )
         await self.db.commit()
+
+    async def ensure_connected(self):
+        """Reconnect if the DB connection was lost."""
+        try:
+            await self.db.execute("SELECT 1")
+        except (ValueError, Exception):
+            logger.warning("DB connection lost, reconnecting...")
+            self.db = await aiosqlite.connect(self.path)
 
     async def close(self):
         if self.db:
@@ -383,6 +391,7 @@ class ExpireBot:
         self.min_power = config.get("min_power_level", 50)
         self.prefix = config.get("command_prefix", "!expire")
         self.cmd_read_limit = config.get("cmd_read_limit", 24)
+        self.help_text = HELP_TEMPLATE.format(p=self.prefix)
         self.notify_cleanup = config.get("notify_cleanup", False)
 
         # Admin whitelist: None = everyone with power level, list = only these users
@@ -402,7 +411,7 @@ class ExpireBot:
                 self.admins = None
         else:
             self.admins = None
-        self.default_retention = parse_duration(str(config.get("default_retention", "24h"))) or 86400
+        self.default_retention = parse_duration(str(config.get("default_retention", "7d"))) or 604800
         self.command_cooldown = config.get("command_cooldown", 5)
 
         self.store_path = config.get("store_path", "/data/store")
@@ -660,7 +669,7 @@ class ExpireBot:
             await self.db.set_retention(room.room_id, self.default_retention, self.user_id)
             logger.info(f"Default retention {format_duration(self.default_retention)} set for {room.room_id}")
 
-        msg = HELP_TEXT + f"\n\n**Default retention: {format_duration(self.default_retention)}.**"
+        msg = self.help_text + f"\n\n**Default retention: {format_duration(self.default_retention)}.**"
         # _can_redact will fetch power_levels via API if not in cache (federation)
         if not await self._can_redact(room):
             msg += (
@@ -727,6 +736,10 @@ class ExpireBot:
         """Delete E2E store and exit. Docker restart will re-login with fresh device."""
         import shutil
         try:
+            await self.db.close()
+        except Exception:
+            pass
+        try:
             await self.client.close()
         except Exception:
             pass
@@ -757,23 +770,31 @@ class ExpireBot:
         # Successful decrypt — reset E2E failure counters
         self._decrypt_fail_sessions.clear()
         self._decrypt_fail_since = 0.0
-        retention = await self.db.get_retention(room.room_id)
-        if not retention:
-            return
-        ts = getattr(event, "server_timestamp", 0)
-        if ts and hasattr(event, "event_id"):
-            await self.db.track_event(event.event_id, room.room_id, ts)
+        try:
+            await self.db.ensure_connected()
+            retention = await self.db.get_retention(room.room_id)
+            if not retention:
+                return
+            ts = getattr(event, "server_timestamp", 0)
+            if ts and hasattr(event, "event_id"):
+                await self.db.track_event(event.event_id, room.room_id, ts)
+        except Exception as e:
+            logger.error(f"DB error in _track_event: {e}")
 
     async def _track_megolm(self, room: MatrixRoom, event: MegolmEvent):
         """Track encrypted messages we can't decrypt (still need to be redacted)."""
         if self._first_sync:
             return
-        retention = await self.db.get_retention(room.room_id)
-        if not retention:
-            return
-        ts = getattr(event, "server_timestamp", 0)
-        if ts and hasattr(event, "event_id"):
-            await self.db.track_event(event.event_id, room.room_id, ts)
+        try:
+            await self.db.ensure_connected()
+            retention = await self.db.get_retention(room.room_id)
+            if not retention:
+                return
+            ts = getattr(event, "server_timestamp", 0)
+            if ts and hasattr(event, "event_id"):
+                await self.db.track_event(event.event_id, room.room_id, ts)
+        except Exception as e:
+            logger.error(f"DB error in _track_megolm: {e}")
 
     # ─── Commands ─────────────────────────────────────────────────────
 
@@ -787,6 +808,8 @@ class ExpireBot:
         body = event.body[:len(self.prefix) + self.cmd_read_limit].strip()
         if not body.startswith(self.prefix):
             return
+
+        await self.db.ensure_connected()
 
         # Admin whitelist — block all commands from non-admins
         if self.admins and not self._match_admin(event.sender):
@@ -806,22 +829,22 @@ class ExpireBot:
         reply_to = event.event_id
 
         if cmd == "help":
-            await self._send(room.room_id, HELP_TEXT, reply_to)
+            await self._send(room.room_id, self.help_text, reply_to)
         elif cmd in ("status", "show"):
             await self._cmd_status(room, reply_to)
         elif cmd == "set":
             if len(args) < 2:
-                await self._send(room.room_id, "Usage: `!expire set <duration>` (e.g. `7d`, `1h`, `10h 15m`)", reply_to)
+                await self._send(room.room_id, f"Usage: `{self.prefix} set <duration>` (e.g. `7d`, `1h`, `10h 15m`)", reply_to)
                 return
             await self._cmd_set(room, event, " ".join(args[1:]), reply_to)
-        elif cmd == "off":
+        elif cmd in ("off", "unset"):
             await self._cmd_off(room, event, reply_to)
         elif cmd == "clean":
             await self._cmd_clean(room, event, reply_to)
         elif parse_duration(cmd):
             await self._cmd_set(room, event, " ".join(args), reply_to)
         else:
-            await self._send(room.room_id, f"Unknown command: `{cmd}`. Try `!expire help`", reply_to)
+            await self._send(room.room_id, f"Unknown command: `{cmd}`. Try `{self.prefix} help`", reply_to)
 
     # ─── Commands ─────────────────────────────────────────────────────────
 
@@ -838,7 +861,7 @@ class ExpireBot:
         else:
             status = "No retention set for this room.\n"
             status += f"**Permissions:** {'OK' if can_redact else 'MISSING — need power level 50+'}\n"
-            status += "Use `!expire set <duration>` to enable."
+            status += f"Use `{self.prefix} set <duration>` to enable."
 
         await self._send(room.room_id, status, reply_to)
 
@@ -1212,6 +1235,11 @@ class ExpireBot:
         # Trust devices only when actual device key changes occurred
         changed = getattr(response, "changed_device_keys", None)
         if changed:
+            try:
+                if self.client.olm and self.client.should_query_keys:
+                    await self.client.keys_query()
+            except Exception:
+                pass
             self._trust_all_devices()
 
     async def _init_encrypted_rooms(self):
@@ -1225,12 +1253,14 @@ class ExpireBot:
             if count >= 10:  # Limit to avoid rate limiting at startup
                 break
             try:
-                msg = HELP_TEXT + f"\n\n**Default retention: {format_duration(self.default_retention)}.**"
                 await self.rate_limiter.acquire()
-                event_id = await self._send(room_id, msg)
-                if event_id:
-                    logger.info(f"E2E session init: {room.display_name}")
-                    count += 1
+                # Send empty Olm message to establish E2E session (no spam)
+                await asyncio.wait_for(
+                    self.client.share_group_session(room_id),
+                    timeout=15,
+                )
+                logger.info(f"E2E session init: {room.display_name}")
+                count += 1
             except Exception as e:
                 logger.warning(f"E2E init failed for {room.display_name}: {e}")
 
@@ -1296,6 +1326,8 @@ class ExpireBot:
                 content["m.relates_to"] = {
                     "m.in_reply_to": {"event_id": reply_to},
                 }
+            # Trust any new devices before sending (federated users etc.)
+            self._trust_all_devices()
             resp = await asyncio.wait_for(
                 self.client.room_send(room_id, "m.room.message", content),
                 timeout=15,
@@ -1441,7 +1473,11 @@ async def main():
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     # Suppress noisy nio internal warnings (malformed events from server etc.)
-    logging.getLogger("nio").setLevel(logging.ERROR)
+    class _NioFilter(logging.Filter):
+        def filter(self, record):
+            return not record.name.startswith("nio")
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(_NioFilter())
 
     logger.info(f"Starting Expire Bot as {config['user_id']}")
     logger.info(f"Homeserver: {config['homeserver']}")
