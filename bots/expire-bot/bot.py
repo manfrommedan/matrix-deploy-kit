@@ -382,6 +382,7 @@ class ExpireBot:
         self.max_retention = parse_duration(config.get("max_retention", "365d")) or 31536000
         self.min_power = config.get("min_power_level", 50)
         self.prefix = config.get("command_prefix", "!expire")
+        self.cmd_read_limit = config.get("cmd_read_limit", 24)
         self.notify_cleanup = config.get("notify_cleanup", False)
 
         # Admin whitelist: None = everyone with power level, list = only these users
@@ -783,7 +784,7 @@ class ExpireBot:
         if event.sender == self.user_id:
             return
 
-        body = event.body[:64].strip()
+        body = event.body[:len(self.prefix) + self.cmd_read_limit].strip()
         if not body.startswith(self.prefix):
             return
 
