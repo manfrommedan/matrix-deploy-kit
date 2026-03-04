@@ -24,7 +24,7 @@ NC='\033[0m'
 
 # --- Вывод ---
 log()     { echo -e "${GREEN}[+]${NC} $*"; }
-warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
+warn()    { echo -e "${YELLOW}[!]${NC} $*" >&2; }
 err()     { echo -e "${RED}[x]${NC} $*" >&2; }
 info()    { echo -e "${BLUE}[i]${NC} $*"; }
 step()    { echo ""; echo -e "${BOLD}${CYAN}--- $* ---${NC}"; echo ""; }
@@ -612,8 +612,12 @@ health_check() {
             all_ok=false
         fi
 
-        # Federation
-        local fed_url="https://${MATRIX_HOSTNAME}:8448/_matrix/federation/v1/version"
+        # Federation (порт 443 если federation_public_port=443, иначе 8448)
+        local fed_port="8448"
+        local fed_public_port
+        fed_public_port=$(_vars_yml "matrix_federation_public_port")
+        [[ "$fed_public_port" == "443" ]] && fed_port="443"
+        local fed_url="https://${MATRIX_HOSTNAME}:${fed_port}/_matrix/federation/v1/version"
         http_code=$(curl -so /dev/null -w '%{http_code}' --max-time 5 "$fed_url" 2>/dev/null || true)
         if [[ "$http_code" == "200" ]]; then
             echo -e "    ${GREEN}●${NC} Federation API    → 200"
