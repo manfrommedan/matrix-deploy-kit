@@ -2,6 +2,7 @@
 """Matrix Expire Bot — auto-delete old messages from rooms."""
 
 import asyncio
+import fnmatch
 import hashlib
 import io
 import json
@@ -162,7 +163,7 @@ State events (room name, topic, members) are preserved.
 
 **Permissions:**
 • Bot needs **moderator** power level (50+) to redact messages
-• Only room moderators (50+) can configure the bot
+• Bot management is restricted to authorized admins
 • If bot lacks permissions, it will notify you
 
 _Cleanup runs automatically every few minutes._"""
@@ -382,6 +383,24 @@ class ExpireBot:
         self.min_power = config.get("min_power_level", 50)
         self.prefix = config.get("command_prefix", "!expire")
         self.notify_cleanup = config.get("notify_cleanup", False)
+
+        # Admin whitelist: None = everyone with power level, list = only these users
+        admins_raw = config.get("admins", "all")
+        if isinstance(admins_raw, list):
+            self.admins: list[str] | None = [a.strip() for a in admins_raw if a.strip()]
+            if self.admins:
+                logger.info(f"Admin whitelist: {', '.join(self.admins)}")
+            else:
+                self.admins = None
+        elif isinstance(admins_raw, str) and admins_raw.strip().lower() != "all":
+            # Comma-separated string from env var
+            self.admins = [a.strip() for a in admins_raw.split(",") if a.strip()]
+            if self.admins:
+                logger.info(f"Admin whitelist: {', '.join(self.admins)}")
+            else:
+                self.admins = None
+        else:
+            self.admins = None
         self.default_retention = parse_duration(str(config.get("default_retention", "24h"))) or 86400
         self.command_cooldown = config.get("command_cooldown", 5)
 
@@ -405,6 +424,8 @@ class ExpireBot:
         self._first_sync = True
         self._fresh_login = False
         self._shutdown = False
+        self._stopped = False
+        self._bg_tasks: set[asyncio.Task] = set()
         self._cmd_cooldown: dict[str, float] = {}  # user_id → last command time
 
     # ─── Session persistence (device_id for E2E) ──────────────────────────
@@ -458,15 +479,17 @@ class ExpireBot:
 
         # Initial sync
         logger.info("Performing initial sync...")
-        await self.client.sync(timeout=10000, full_state=True)
+        await asyncio.wait_for(
+            self.client.sync(timeout=10000, full_state=True), timeout=60,
+        )
 
         # E2E key management — upload our keys + query others
         if self.client.olm:
             if self.client.should_upload_keys:
-                await self.client.keys_upload()
+                await asyncio.wait_for(self.client.keys_upload(), timeout=15)
                 logger.info("Device keys uploaded to server")
             if self.client.should_query_keys:
-                await self.client.keys_query()
+                await asyncio.wait_for(self.client.keys_query(), timeout=15)
                 logger.info("Queried device keys from server")
 
         self._trust_all_devices()
@@ -511,7 +534,7 @@ class ExpireBot:
                     device_id=saved["device_id"],
                     access_token=token,
                 )
-                resp = await self.client.whoami()
+                resp = await asyncio.wait_for(self.client.whoami(), timeout=15)
                 if hasattr(resp, "user_id"):
                     logger.info(
                         f"Session restored as {resp.user_id} "
@@ -526,7 +549,9 @@ class ExpireBot:
             # Reuse saved device_id if available
             if saved and saved.get("device_id"):
                 self.client.device_id = saved["device_id"]
-            resp = await self.client.login(self.password, device_name="expire-bot")
+            resp = await asyncio.wait_for(
+                self.client.login(self.password, device_name="expire-bot"), timeout=15,
+            )
             if isinstance(resp, LoginResponse):
                 self._save_session(resp.device_id, resp.access_token)
                 self._fresh_login = True
@@ -543,7 +568,7 @@ class ExpireBot:
         if self.access_token:
             self.client.access_token = self.access_token
             self.client.user_id = self.user_id
-            resp = await self.client.whoami()
+            resp = await asyncio.wait_for(self.client.whoami(), timeout=15)
             if hasattr(resp, "user_id"):
                 logger.info(f"Authenticated as {resp.user_id} (token, no device)")
                 logger.warning(
@@ -561,25 +586,49 @@ class ExpireBot:
     async def _signal_shutdown(self):
         logger.info("Received shutdown signal, cleaning up...")
         self._shutdown = True
+        # Cancel background tasks
+        for task in self._bg_tasks:
+            if not task.done():
+                task.cancel()
+        for task in self._bg_tasks:
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self._bg_tasks.clear()
         await self.stop()
-        sys.exit(0)
+
+    def _spawn_bg(self, coro):
+        """Create a tracked background task (cleaned up on shutdown)."""
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     async def stop(self):
+        if self._stopped:
+            return
+        self._stopped = True
         await self.db.close()
         await self.client.close()
 
     # ─── Callbacks ────────────────────────────────────────────────────────
 
     async def _on_invite(self, room: MatrixRoom, event: InviteMemberEvent):
-        """Auto-accept invites."""
+        """Auto-accept invites (only from admins if whitelist is set)."""
         if event.state_key != self.user_id:
             return
+        if self.admins and not self._match_admin(event.sender):
+            logger.warning(f"Ignored invite to {room.room_id} from {event.sender} (not in admin whitelist)")
+            return
         logger.info(f"Invited to {room.room_id} by {event.sender}")
-        result = await self.client.join(room.room_id)
-        if hasattr(result, "room_id"):
-            logger.info(f"Joined {room.room_id}")
-        else:
-            logger.error(f"Failed to join {room.room_id}: {result}")
+        try:
+            result = await asyncio.wait_for(self.client.join(room.room_id), timeout=30)
+            if hasattr(result, "room_id"):
+                logger.info(f"Joined {room.room_id}")
+            else:
+                logger.error(f"Failed to join {room.room_id}: {result}")
+        except asyncio.TimeoutError:
+            logger.error(f"Join timed out for {room.room_id}")
 
     async def _on_member(self, room: MatrixRoom, event: RoomMemberEvent):
         """Send help when bot joins a room for the first time."""
@@ -600,15 +649,13 @@ class ExpireBot:
             logger.debug(f"Already greeted {room.room_id}, skipping help")
             return
 
-        # Small delay for power_levels to sync
-        await asyncio.sleep(2)
-
         # Set default retention for new rooms
         if not await self.db.get_retention(room.room_id):
             await self.db.set_retention(room.room_id, self.default_retention, self.user_id)
             logger.info(f"Default retention {format_duration(self.default_retention)} set for {room.room_id}")
 
         msg = HELP_TEXT + f"\n\n**Default retention: {format_duration(self.default_retention)}.**"
+        # _can_redact will fetch power_levels via API if not in cache (federation)
         if not await self._can_redact(room):
             msg += (
                 "\n\n**Warning:** I don't have redact permissions in this room yet. "
@@ -639,7 +686,6 @@ class ExpireBot:
         """Handle encrypted messages we can't decrypt."""
         if self._first_sync:
             return
-        self._trust_all_devices()
         logger.debug(
             f"Undecryptable event {event.event_id} in {room.display_name} "
             f"from {event.sender} (session {event.session_id})"
@@ -680,6 +726,11 @@ class ExpireBot:
 
         body = event.body.strip()
         if not body.startswith(self.prefix):
+            return
+
+        # Admin whitelist — block all commands from non-admins
+        if self.admins and not self._match_admin(event.sender):
+            await self._send(room.room_id, "You are not in the bot's admin whitelist.", event.event_id)
             return
 
         # Rate limit commands per user
@@ -733,11 +784,9 @@ class ExpireBot:
 
     async def _cmd_set(self, room: MatrixRoom, event: RoomMessageText, duration_str: str, reply_to: str | None = None):
         if not await self._has_power(room, event.sender):
-            await self._send(
-                room.room_id,
-                f"Only room moderators (power level {self.min_power}+) can configure the bot.",
-                reply_to,
-            )
+            reason = "Only whitelisted admins can configure the bot." if self.admins \
+                else f"Only room moderators (power level {self.min_power}+) can configure the bot."
+            await self._send(room.room_id, reason, reply_to)
             return
 
         seconds = parse_duration(duration_str)
@@ -778,7 +827,7 @@ class ExpireBot:
         )
         logger.info(f"Retention set: {room.room_id} → {dur} by {event.sender}")
         # Fire-and-forget: import + cleanup in background (don't block sync)
-        asyncio.create_task(self._bg_set_cleanup(room.room_id, seconds))
+        self._spawn_bg(self._bg_set_cleanup(room.room_id, seconds))
 
     async def _bg_set_cleanup(self, room_id: str, retention_seconds: int):
         """Background task: import history + run initial cleanup after !expire set."""
@@ -795,11 +844,9 @@ class ExpireBot:
 
     async def _cmd_off(self, room: MatrixRoom, event: RoomMessageText, reply_to: str | None = None):
         if not await self._has_power(room, event.sender):
-            await self._send(
-                room.room_id,
-                f"Only room moderators (power level {self.min_power}+) can configure the bot.",
-                reply_to,
-            )
+            reason = "Only whitelisted admins can configure the bot." if self.admins \
+                else f"Only room moderators (power level {self.min_power}+) can configure the bot."
+            await self._send(room.room_id, reason, reply_to)
             return
 
         info = await self.db.get_retention(room.room_id)
@@ -815,11 +862,9 @@ class ExpireBot:
 
     async def _cmd_clean(self, room: MatrixRoom, event: RoomMessageText, reply_to: str | None = None):
         if not await self._has_power(room, event.sender):
-            await self._send(
-                room.room_id,
-                f"Only room moderators (power level {self.min_power}+) can run cleanup.",
-                reply_to,
-            )
+            reason = "Only whitelisted admins can run cleanup." if self.admins \
+                else f"Only room moderators (power level {self.min_power}+) can run cleanup."
+            await self._send(room.room_id, reason, reply_to)
             return
 
         if not await self._can_redact(room):
@@ -837,19 +882,22 @@ class ExpireBot:
 
         await self._send(room.room_id, "Starting cleanup...", reply_to)
         # Fire-and-forget: full clean in background (don't block sync)
-        asyncio.create_task(self._bg_clean(room.room_id))
+        self._spawn_bg(self._bg_clean(room.room_id))
 
     async def _bg_clean(self, room_id: str):
         """Background task: import ALL history + redact ALL messages (loops until done)."""
         try:
             async with self._clean_lock:
                 total = 0
-                while not self._shutdown:
+                failures = 0
+                deadline = time.time() + 300  # 5 min max per run
+                while not self._shutdown and time.time() < deadline:
                     # Redact whatever is already tracked
                     count = await self._redact_expired(room_id, 0)
                     total += count
 
                     if count > 0:
+                        failures = 0
                         continue  # More might be available
 
                     # Nothing to redact — check if we've imported everything
@@ -858,7 +906,18 @@ class ExpireBot:
                         break  # All imported and redacted
 
                     # Import more history (unlimited scan for clean)
+                    prev_count = total
                     await self._import_history(room_id, 0, max_scan=50_000)
+
+                    # Detect stuck loop (import keeps failing)
+                    if total == prev_count:
+                        failures += 1
+                        if failures >= 5:
+                            logger.warning(f"bg_clean: no progress after {failures} rounds in {room_id}, stopping")
+                            break
+                        await asyncio.sleep(2)
+                    else:
+                        failures = 0
 
                 if total > 0:
                     await self.db.log_cleanup(room_id, total)
@@ -867,7 +926,10 @@ class ExpireBot:
                     await self._send(room_id, "Nothing to clean.")
         except Exception as e:
             logger.error(f"Background clean failed for {room_id}: {e}")
-            await self._send(room_id, f"Cleanup error: {e}")
+            try:
+                await self._send(room_id, f"Cleanup error: {e}")
+            except Exception:
+                pass
 
     # ─── Cleanup loop ─────────────────────────────────────────────────────
 
@@ -876,6 +938,9 @@ class ExpireBot:
             await asyncio.sleep(self.cleanup_interval)
             if self._shutdown:
                 continue
+            # Purge stale cooldown entries
+            now = time.time()
+            self._cmd_cooldown = {k: v for k, v in self._cmd_cooldown.items() if now - v < 3600}
             # Skip cycle if rate limited or clean command is running
             if self.rate_limiter.in_cooldown:
                 logger.debug("Cleanup skipped: rate limiter cooldown")
@@ -1084,21 +1149,28 @@ class ExpireBot:
             status = getattr(response.transport_response, "status", 0)
             if status == 429:
                 self.rate_limiter.set_cooldown()
-        self._trust_all_devices()
+        # Trust devices only when actual device key changes occurred
+        changed = getattr(response, "changed_device_keys", None)
+        if changed:
+            self._trust_all_devices()
 
     async def _init_encrypted_rooms(self):
-        """Silently establish Olm sessions with encrypted rooms on startup.
-        Sends a minimal message (auto-deleted in 5s) — no spam."""
+        """Establish Olm sessions with encrypted rooms on startup."""
         if not self.client.olm:
             return
+        count = 0
         for room_id, room in self.client.rooms.items():
             if not room.encrypted:
                 continue
+            if count >= 10:  # Limit to avoid rate limiting at startup
+                break
             try:
                 msg = HELP_TEXT + f"\n\n**Default retention: {format_duration(self.default_retention)}.**"
+                await self.rate_limiter.acquire()
                 event_id = await self._send(room_id, msg)
                 if event_id:
                     logger.info(f"E2E session init: {room.display_name}")
+                    count += 1
             except Exception as e:
                 logger.warning(f"E2E init failed for {room.display_name}: {e}")
 
@@ -1130,15 +1202,17 @@ class ExpireBot:
             }
             content_type = content_types.get(ext, "image/png")
 
-            resp, _ = await self.client.upload(
-                io.BytesIO(data),
-                content_type=content_type,
-                filename=os.path.basename(avatar_path),
-                filesize=len(data),
+            resp, _ = await asyncio.wait_for(
+                self.client.upload(
+                    io.BytesIO(data),
+                    content_type=content_type,
+                    filename=os.path.basename(avatar_path),
+                    filesize=len(data),
+                ), timeout=30,
             )
 
             if isinstance(resp, UploadResponse):
-                await self.client.set_avatar(resp.content_uri)
+                await asyncio.wait_for(self.client.set_avatar(resp.content_uri), timeout=15)
                 with open(hash_file, "w") as f:
                     f.write(file_hash)
                 logger.info(f"Avatar set from {avatar_path}")
@@ -1162,10 +1236,9 @@ class ExpireBot:
                 content["m.relates_to"] = {
                     "m.in_reply_to": {"event_id": reply_to},
                 }
-            resp = await self.client.room_send(
-                room_id,
-                "m.room.message",
-                content,
+            resp = await asyncio.wait_for(
+                self.client.room_send(room_id, "m.room.message", content),
+                timeout=15,
             )
             if hasattr(resp, "event_id"):
                 return resp.event_id
@@ -1173,19 +1246,54 @@ class ExpireBot:
             logger.error(f"Failed to send to {room_id}: {e}")
         return None
 
-    async def _has_power(self, room: MatrixRoom, user_id: str) -> bool:
-        """Check if user has sufficient power level to configure bot."""
+    async def _fetch_power_levels(self, room_id: str) -> dict | None:
+        """Fetch power_levels via API when room state cache is empty (federation lag)."""
+        try:
+            resp = await asyncio.wait_for(
+                self.client.room_get_state_event(room_id, "m.room.power_levels", ""),
+                timeout=10,
+            )
+            if hasattr(resp, "content") and resp.content:
+                logger.debug(f"Fetched power_levels via API for {room_id}")
+                return resp.content
+        except Exception as e:
+            logger.debug(f"Could not fetch power_levels for {room_id}: {e}")
+        return None
+
+    async def _get_user_level(self, room: MatrixRoom, user_id: str) -> int:
+        """Get user's power level, with API fallback for federated rooms."""
         pl = room.power_levels
-        if pl is None:
+        if pl is not None:
+            return pl.get_user_level(user_id)
+        content = await self._fetch_power_levels(room.room_id)
+        if content is None:
+            return 0
+        return content.get("users", {}).get(user_id, content.get("users_default", 0))
+
+    def _match_admin(self, user_id: str) -> bool:
+        """Check if user_id matches admin whitelist (supports glob: @*:server)."""
+        if not self.admins:
             return False
-        return pl.get_user_level(user_id) >= self.min_power
+        return any(fnmatch.fnmatch(user_id, pattern) for pattern in self.admins)
+
+    async def _has_power(self, room: MatrixRoom, user_id: str) -> bool:
+        """Check if user is allowed to configure bot.
+        With admin whitelist: only matching users. Without: power level check."""
+        if self.admins:
+            return self._match_admin(user_id)
+        return await self._get_user_level(room, user_id) >= self.min_power
 
     async def _can_redact(self, room: MatrixRoom) -> bool:
         """Check if bot can redact messages in this room."""
         pl = room.power_levels
-        if pl is None:
+        if pl is not None:
+            return pl.can_user_redact(self.user_id)
+        content = await self._fetch_power_levels(room.room_id)
+        if content is None:
             return False
-        return pl.can_user_redact(self.user_id)
+        user_level = content.get("users", {}).get(self.user_id, content.get("users_default", 0))
+        redact_level = content.get("redact", 50)
+        return user_level >= redact_level
 
     @staticmethod
     def _md_to_html(text: str) -> str:
@@ -1239,6 +1347,7 @@ def load_config() -> dict:
         ("EXPIRE_BOT_DB", "database"),
         ("EXPIRE_BOT_AVATAR", "avatar"),
         ("EXPIRE_BOT_DEFAULT_RETENTION", "default_retention"),
+        ("EXPIRE_BOT_ADMINS", "admins"),
     ]:
         val = os.environ.get(env_key)
         if val:
@@ -1283,7 +1392,7 @@ async def main():
     except (KeyboardInterrupt, SystemExit):
         logger.info("Shutting down...")
     finally:
-        await bot.stop()
+        await bot.stop()  # idempotent — safe even if _signal_shutdown already called
 
 
 if __name__ == "__main__":
