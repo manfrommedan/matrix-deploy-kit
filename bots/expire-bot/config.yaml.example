@@ -11,7 +11,7 @@ password: "CHANGE_ME"
 
 # ─── Retention ────────────────────────────────────────────────
 # Default retention for new rooms (set on first join)
-default_retention: "24h"
+default_retention: "7d"
 
 # Maximum retention period users can set
 max_retention: "365d"
@@ -54,6 +54,10 @@ admins: "all"
 
 # Command prefix
 command_prefix: "!expire"
+
+# Max chars to read from message body (after prefix).
+# Only enough for the command + args, rest is ignored.
+cmd_read_limit: 24
 
 # ─── Notifications ───────────────────────────────────────────
 # Report deleted message count after scheduled cleanup (true/false)
