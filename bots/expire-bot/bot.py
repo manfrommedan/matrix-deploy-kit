@@ -427,6 +427,11 @@ class ExpireBot:
         self._stopped = False
         self._bg_tasks: set[asyncio.Task] = set()
         self._cmd_cooldown: dict[str, float] = {}  # user_id → last command time
+        # E2E health: track decrypt failures for auto-recovery
+        self._decrypt_fail_sessions: set[str] = set()
+        self._decrypt_fail_since: float = 0.0
+        self._e2e_reset_threshold = 5  # unique failing sessions
+        self._e2e_reset_window = 120  # seconds
 
     # ─── Session persistence (device_id for E2E) ──────────────────────────
 
@@ -683,13 +688,64 @@ class ExpireBot:
             logger.info(f"Permissions restored in {room.room_id}")
 
     async def _on_megolm(self, room: MatrixRoom, event: MegolmEvent):
-        """Handle encrypted messages we can't decrypt."""
+        """Handle encrypted messages we can't decrypt — request missing keys.
+        If too many unique sessions fail in a short window, nuke E2E store and restart.
+        """
         if self._first_sync:
             return
-        logger.debug(
+        logger.warning(
             f"Undecryptable event {event.event_id} in {room.display_name} "
             f"from {event.sender} (session {event.session_id})"
         )
+        # Request missing room key from the sender's device
+        try:
+            if self.client.olm:
+                await self.client.request_room_key(event)
+                logger.info(f"Requested room key for session {event.session_id} in {room.room_id}")
+        except Exception as e:
+            logger.debug(f"Key request failed: {e}")
+
+        # Track unique failing sessions for auto-recovery
+        now = time.time()
+        if not self._decrypt_fail_since:
+            self._decrypt_fail_since = now
+        # Reset window if too much time passed
+        if now - self._decrypt_fail_since > self._e2e_reset_window:
+            self._decrypt_fail_sessions.clear()
+            self._decrypt_fail_since = now
+        self._decrypt_fail_sessions.add(event.session_id)
+
+        if len(self._decrypt_fail_sessions) >= self._e2e_reset_threshold:
+            logger.error(
+                f"E2E BROKEN: {len(self._decrypt_fail_sessions)} unique undecryptable sessions "
+                f"in {int(now - self._decrypt_fail_since)}s — nuking E2E store and restarting"
+            )
+            await self._nuke_e2e_and_restart()
+
+    async def _nuke_e2e_and_restart(self):
+        """Delete E2E store and exit. Docker restart will re-login with fresh device."""
+        import shutil
+        try:
+            await self.client.close()
+        except Exception:
+            pass
+        # Remove session file so next start does a fresh login
+        session_file = self._session_file()
+        if os.path.exists(session_file):
+            os.remove(session_file)
+            logger.info(f"Removed session file: {session_file}")
+        # Nuke E2E crypto store
+        store = self.store_path
+        if os.path.isdir(store):
+            for entry in os.listdir(store):
+                path = os.path.join(store, entry)
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+            logger.info(f"Wiped E2E store: {store}")
+        logger.error("Exiting for auto-restart with fresh E2E session")
+        sys.exit(1)
 
     # ─── Event tracking (maubot-style) ───────────────────────────────
 
@@ -697,6 +753,9 @@ class ExpireBot:
         """Track incoming messages for rooms with retention."""
         if self._first_sync:
             return
+        # Successful decrypt — reset E2E failure counters
+        self._decrypt_fail_sessions.clear()
+        self._decrypt_fail_since = 0.0
         retention = await self.db.get_retention(room.room_id)
         if not retention:
             return
@@ -724,7 +783,7 @@ class ExpireBot:
         if event.sender == self.user_id:
             return
 
-        body = event.body.strip()
+        body = event.body[:64].strip()
         if not body.startswith(self.prefix):
             return
 
