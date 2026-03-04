@@ -22,7 +22,7 @@
 | Диск | 20 GB | 50+ GB |
 | CPU | 1 ядро | 2+ ядра |
 | Домен | 1 домен | с настроенным DNS |
-| Порты | 80, 443, 8448 | + порты для звонков |
+| Порты | 80, 443, 8448 | + порты для звонков (LiveKit, Coturn) |
 
 ---
 
@@ -93,7 +93,7 @@ bash /root/matrix-deploy-kit/deploy.sh
 ## Шаг 5. Подготовка сервера
 
 ```bash
-bash tools/prepare-server.sh --domain example.com \
+bash tools/prepare_server.sh --domain example.com \
   --synapse-admin-port 35805 \
   --element-admin-port 35122 \
   --with-landing-page \
@@ -108,7 +108,7 @@ bash tools/prepare-server.sh --domain example.com \
 - Настроит nginx (reverse proxy → Traefik)
 - Скопирует landing page и страницу ошибок
 
-### Флаги prepare-server.sh
+### Флаги prepare_server.sh
 
 | Флаг | Что делает |
 |------|-----------|
@@ -124,7 +124,29 @@ bash tools/prepare-server.sh --domain example.com \
 | `--skip-docker` | Не ставить Docker (плейбук поставит) |
 | `--skip-swap` | Не создавать swap |
 | `--swap-size SIZE` | Размер swap (по умолчанию 2G) |
+| `--federation-on-443` | Федерация на 443 (не генерировать 8448 nginx-блок) |
+| `--coturn-stun PORT` | Кастомный STUN порт для ufw (по умолчанию 3478) |
+| `--coturn-turns PORT` | Кастомный TURNS порт для ufw (по умолчанию 5349) |
+| `--livekit-rtc-tcp PORT` | LiveKit RTC TCP порт для ufw |
+| `--livekit-turn-tls PORT` | LiveKit TURN TLS порт для ufw |
 | `--dry-run` | Показать план без выполнения |
+
+### Шаг 5.1. TLS-сертификаты для звонков (nginx-режим)
+
+В nginx+Traefik режиме Traefik не управляет ACME-сертификатами, поэтому LiveKit
+и Coturn не могут получить TLS-серты от Traefik. `prepare_server.sh` решает это
+автоматически:
+
+1. Копирует certbot-серты в `${DATA_PATH}/livekit-server/certs/` и `${DATA_PATH}/coturn/certs/`
+2. Устанавливает владельца `matrix:matrix` (UID/GID определяется динамически)
+3. Создаёт certbot renewal hook (`/etc/letsencrypt/renewal-hooks/post/restart-matrix-tls.sh`), который при обновлении сертов автоматически копирует их и перезапускает LiveKit, Coturn, nginx
+
+> **Если `prepare_server.sh` запускается до первого деплоя** (пользователь `matrix`
+> ещё не создан), серты получат владельца `root:root`. Ansible исправит владельца
+> при деплое.
+
+> **Если запускаете повторно после деплоя**, используйте `--data-path` для указания
+> расположения данных Matrix (по умолчанию `/matrix`).
 
 ---
 
@@ -182,8 +204,14 @@ bash tools/update.sh
 - Сделает бэкап текущей конфигурации
 - Обновит playbook (git pull)
 - Запустит `just install-all`
+- Синхронизирует TLS-серты для LiveKit/Coturn (nginx-режим)
 - Проверит что все контейнеры живы
 - При ошибке — откатит автоматически
+
+Только синхронизация сертов (без обновления):
+```bash
+bash tools/update.sh --sync-certs
+```
 
 ---
 
@@ -230,8 +258,8 @@ docker exec matrix-postgres pg_dumpall -U matrix > /root/matrix-backup.sql
 ├── inventory/host_vars/matrix.*/
 │   └── vars.yml                       # ← ТВОЯ КОНФИГУРАЦИЯ
 ├── tools/
-│   ├── generate-vars.sh               # Генератор vars.yml
-│   ├── prepare-server.sh              # Подготовка сервера
+│   ├── generate_vars.sh               # Генератор vars.yml
+│   ├── prepare_server.sh              # Подготовка сервера
 │   ├── update.sh                      # Обновление
 │   └── nuke-user.sh                   # Удаление пользователя
 ├── templates/
