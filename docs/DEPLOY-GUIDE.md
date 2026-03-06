@@ -41,6 +41,28 @@ element.example.com    → IP    (Element Web клиент)
 ntfy.example.com       → IP    (push-уведомления, если включишь)
 ```
 
+### SRV-запись для федерации (альтернатива .well-known)
+
+Если не хочешь обслуживать `.well-known/matrix/server` на базовом домене (например, скрыть что это Matrix-сервер), добавь SRV-запись:
+
+```
+Тип:        SRV
+Имя:        _matrix-fed._tcp
+Приоритет:  10
+Вес:        0
+Порт:       443
+Цель:       matrix.example.com
+```
+
+Проверка:
+```bash
+dig SRV _matrix-fed._tcp.example.com
+```
+
+> **Нюансы**:
+> - SRV заменяет только серверный discovery (федерация). Клиентский discovery (`.well-known/matrix/client`) SRV **не заменяет** — пользователи должны вводить `matrix.example.com` при логине вручную.
+> - SRV-запись публична — `dig` покажет что на домене Matrix. Для полного скрытия это не поможет.
+
 > **Важно**: `example.com` — это твой bare-домен. Matrix ID пользователей будет `@user:example.com`.
 
 ---
@@ -306,8 +328,9 @@ systemctl restart matrix-synapse
 
 ### Федерация не работает
 1. Проверь DNS: A-запись для `matrix.example.com`
-2. Проверь порт 8448 открыт
-3. Тест: https://federationtester.matrix.org
+2. Проверь порт 8448 открыт (если не `--federation-on-443`)
+3. Проверь `.well-known/matrix/server` или SRV-запись `_matrix-fed._tcp.example.com`
+4. Тест: https://federationtester.matrix.org
 
 ### Ускорение Ansible
 ```bash
