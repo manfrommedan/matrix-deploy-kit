@@ -56,6 +56,7 @@ COTURN_TURNS_PORT=""
 COTURN_RELAY_RANGE=""
 FEDERATION_ON_443=false
 TLS13_ONLY=false
+MAX_UPLOAD_SIZE="100"  # MB, должно совпадать с matrix_synapse_max_upload_size_mb
 
 # --- Справка ---
 usage() {
@@ -88,6 +89,7 @@ Reverse proxy (выбрать один):
   --coturn-relay-range MIN:MAX  Coturn relay UDP диапазон (по умолчанию: 49152:49172)
   --federation-on-443       Федерация на 443 (не открывать 8448, не генерировать nginx-блок)
   --tls13-only              Принудительно TLS 1.3 (ssl_protocols TLSv1.3 во всех блоках)
+  --max-upload SIZE_MB      Макс. размер загрузки в МБ (по умолчанию: 100, должно совпадать с Synapse)
 
 Общие опции:
   --deploy-user USER        Имя deploy-пользователя (по умолчанию: matrix-admin)
@@ -140,6 +142,7 @@ while [[ $# -gt 0 ]]; do
         --coturn-relay-range) COTURN_RELAY_RANGE="$2"; shift 2 ;;
         --federation-on-443)  FEDERATION_ON_443=true; shift ;;
         --tls13-only)         TLS13_ONLY=true; shift ;;
+        --max-upload)         MAX_UPLOAD_SIZE="$2"; shift 2 ;;
         --dry-run)          DRY_RUN=true; shift ;;
         -h|--help)          usage ;;
         *)                  err "Неизвестный параметр: $1"; usage ;;
@@ -767,12 +770,45 @@ _proxy_block() {
         proxy_hide_header Referrer-Policy;
         proxy_hide_header Strict-Transport-Security;
 
-        client_max_body_size 100M;
+        client_max_body_size ${MAX_UPLOAD_SIZE}M;
 
         proxy_connect_timeout 60s;
         proxy_send_timeout 600s;
         proxy_read_timeout 600s;
 PROXYBLOCK
+}
+
+# Блок для media upload — ограничение скорости, чтобы не забивать канал
+_media_location() {
+    cat <<MEDIABLOCK
+    # Media upload — троттлинг, чтобы большие файлы не блокировали сообщения
+    location /_matrix/media/ {
+        proxy_pass http://127.0.0.1:81;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+
+        proxy_http_version 1.1;
+
+        proxy_hide_header X-Powered-By;
+        proxy_hide_header Server;
+        proxy_hide_header X-Frame-Options;
+        proxy_hide_header X-Content-Type-Options;
+        proxy_hide_header X-XSS-Protection;
+        proxy_hide_header Content-Security-Policy;
+        proxy_hide_header Referrer-Policy;
+        proxy_hide_header Strict-Transport-Security;
+
+        client_max_body_size ${MAX_UPLOAD_SIZE}M;
+        proxy_request_buffering off;
+        limit_rate 2m;
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 600s;
+        proxy_read_timeout 600s;
+    }
+MEDIABLOCK
 }
 
 # Страница ошибок и landing page
@@ -976,6 +1012,8 @@ $(_ssl_extra)
         add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
     }
 
+$(_media_location)
+
     # Всё остальное — в Traefik
     location / {
 $(_proxy_block)
@@ -1055,6 +1093,8 @@ $(_ssl_extra)
         add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
     }
 
+$(_media_location)
+
     location / {
 $(_proxy_block)
     }
@@ -1102,7 +1142,7 @@ $(_ssl_extra)
         proxy_hide_header Referrer-Policy;
         proxy_hide_header Strict-Transport-Security;
 
-        client_max_body_size 100M;
+        client_max_body_size ${MAX_UPLOAD_SIZE}M;
     }
 
     error_page 502 503 504 /error.html;
