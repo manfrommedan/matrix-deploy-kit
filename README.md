@@ -1,37 +1,71 @@
 # Matrix Server — Deployment Kit
 
-Полный набор для развёртывания Matrix homeserver на базе  
-[matrix-docker-ansible-deploy](https://github.com/spantaleev/matrix-docker-ansible-deploy).
+[![Matrix](https://img.shields.io/badge/Matrix-Server-blue)]()
+[![Docker](https://img.shields.io/badge/Docker-ready-blue)]()
+[![License](https://img.shields.io/badge/license-MIT-green)]()
+
+Полный набор скриптов для быстрого развёртывания **Matrix homeserver**  
+на базе:
+
+https://github.com/spantaleev/matrix-docker-ansible-deploy
 
 ---
 
-## Структура
+# Contents
+
+- [Overview](#overview)
+- [Structure](#structure)
+- [Quick Start](#quick-start)
+- [Server Preparation](#server-preparation)
+- [Matrix Deployment](#matrix-deployment)
+- [Create Admin](#create-admin)
+- [Updating](#updating)
+- [DNS Setup](#dns-setup)
+- [Requirements](#requirements)
+
+---
+
+# Overview
+
+`matrix-deploy-kit` — это набор утилит, который:
+
+- автоматизирует установку Matrix
+- подготавливает сервер
+- настраивает nginx / Traefik
+- добавляет landing page
+- упрощает обновления
+
+---
+
+# Structure
 
 ```
 matrix-deploy-kit/
-├── deploy.sh             # Одна команда — полный деплой
+├── deploy.sh
 ├── tools/
-│   ├── generate_vars.sh  # Интерактивный генератор vars.yml
-│   ├── prepare_server.sh # Подготовка сервера (nginx, certbot, docker, etc.)
-│   ├── update.sh         # Обновление + health check
-│   └── nuke-user.sh      # Полное удаление пользователя
+│   ├── generate_vars.sh
+│   ├── prepare_server.sh
+│   ├── update.sh
+│   └── nuke-user.sh
 └── templates/
-    ├── index.html        # Landing page (matrix.DOMAIN)
-    └── tos.html          # Terms of Service
+    ├── index.html
+    └── tos.html
 ```
 
 ---
 
-# Быстрый старт
+# Quick Start
 
-## 1. Скопируй на сервер
+## 1. Upload to server
 
 ```bash
 scp -r matrix-deploy-kit/ \
   root@<SERVER_IP>:/root/matrix-deploy-kit/
 ```
 
-## 2. Запусти деплой
+---
+
+## 2. Run deployment
 
 ```bash
 ssh root@<SERVER_IP>
@@ -41,16 +75,16 @@ bash /root/matrix-deploy-kit/deploy.sh
 
 Скрипт:
 
-- клонирует playbook
-- копирует `tools/`
-- копирует `templates/`
-- запускает интерактивный генератор `vars.yml`
+- клонирует matrix playbook
+- копирует tools
+- копирует templates
+- запускает генератор `vars.yml`
 
 ---
 
-# Подготовка сервера
+# Server Preparation
 
-## nginx + certbot (рекомендуется)
+## nginx + certbot (recommended)
 
 ```bash
 bash tools/prepare_server.sh \
@@ -61,16 +95,16 @@ bash tools/prepare_server.sh \
   --with-landing-page
 ```
 
-Что делает:
+Что настраивается:
 
-- устанавливает nginx
-- настраивает certbot
-- создаёт landing page
-- открывает скрытые admin-панели
+- nginx reverse proxy
+- certbot SSL
+- landing page
+- скрытые admin панели
 
 ---
 
-## Traefik-only
+## Traefik-only mode
 
 ```bash
 bash tools/prepare_server.sh \
@@ -79,15 +113,15 @@ bash tools/prepare_server.sh \
   --with-ntfy
 ```
 
-В этом режиме:
+Особенности:
 
-- Traefik управляет SSL
-- nginx не используется
-- настройка проще
+- SSL через Traefik
+- меньше компонентов
+- проще конфигурация
 
 ---
 
-# Деплой Matrix
+# Matrix Deployment
 
 ```bash
 cd /root/matrix-docker-ansible-deploy
@@ -100,7 +134,7 @@ just install-all
 
 ---
 
-# Создание администратора
+# Create Admin
 
 ```bash
 docker exec matrix-authentication-service \
@@ -112,7 +146,7 @@ docker exec matrix-authentication-service \
 
 ---
 
-# Обновление
+# Updating
 
 ```bash
 cd /root/matrix-docker-ansible-deploy
@@ -122,78 +156,46 @@ bash tools/update.sh
 
 ---
 
-# Архитектура
+# DNS Setup
 
-Поддерживаются два режима reverse proxy.
-
-## nginx → Traefik (рекомендуется)
-
-Преимущества:
-
-- nginx терминирует SSL
-- certbot управляет сертификатами
-- admin-панели на скрытых портах
-- можно использовать landing page
-
-Используемые параметры:
+Минимальные записи:
 
 ```
---synapse-admin-port
---element-admin-port
-```
-
----
-
-## Traefik-only
-
-Преимущества:
-
-- меньше компонентов
-- автоматический ACME SSL
-- проще конфигурация
-
----
-
-# Опциональные компоненты
-
-| Флаг | Что включает |
-|-----|-----|
-| `--with-ntfy` | ntfy.DOMAIN — push уведомления |
-| `--with-landing-page` | landing page + ToS |
-| `--with-firewall` | настройка ufw |
-| `--with-fail2ban` | fail2ban |
-| `--with-ssh-hardening` | hardening SSH |
-
----
-
-# DNS записи
-
-Минимум:
-
-```
-example.com            → IP
-matrix.example.com     → IP
-element.example.com    → IP
+example.com
+matrix.example.com
+element.example.com
 ```
 
 Опционально:
 
 ```
-ntfy.example.com → IP
+ntfy.example.com
 ```
+
+Все записи должны указывать на IP сервера.
 
 ---
 
-# Требования
+# Requirements
+
+Минимальные требования:
 
 - Ubuntu **20.04+**
 - Debian **11+**
-- минимум **2 GB RAM** (рекомендуется 4 GB)
-- настроенные DNS записи
-- открытые порты:
+- **2GB RAM** минимум (4GB рекомендуется)
+
+Открытые порты:
 
 ```
 80
 443
 8448
 ```
+
+---
+
+# Based on
+
+Matrix deployment stack:
+
+https://github.com/spantaleev/matrix-docker-ansible-deploy
