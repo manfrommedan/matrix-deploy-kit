@@ -1759,7 +1759,19 @@ matrix_media_repo_enabled: true
 # ID файлового хранилища (НЕЛЬЗЯ менять после сохранения медиа!)
 matrix_media_repo_datastore_file_id: '${MEDIA_REPO_DATASTORE_ID}'
 
-# Rate limit для media-repo (дефолт 1 req/s слишком жёсткий для клиентов)
+VARSEOF
+
+# Rate limit media-repo: nginx уже лимитирует, дублировать не нужно
+if [[ "$USE_NGINX" == true ]]; then
+    cat >> "$VARS_FILE" <<'VARSEOF'
+
+# Rate limit media-repo отключён (nginx уже ограничивает limit_rate)
+matrix_media_repo_rate_limit_enabled: false
+VARSEOF
+else
+    cat >> "$VARS_FILE" <<'VARSEOF'
+
+# Rate limit media-repo (без nginx — единственная защита)
 matrix_media_repo_rate_limit_requests_per_second: 10
 matrix_media_repo_rate_limit_burst: 50
 VARSEOF
