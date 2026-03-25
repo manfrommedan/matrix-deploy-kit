@@ -500,7 +500,7 @@ reload_proxy() {
             nginx -t
             return 1
         fi
-    else
+        
         step "Перезапуск Traefik"
 
         if [[ "$DRY_RUN" == true ]]; then
