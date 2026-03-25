@@ -507,9 +507,10 @@ reload_proxy() {
             log "DRY-RUN: docker restart matrix-traefik"
             return 0
         fi
-
+        sleep 15
         if docker ps --format '{{.Names}}' | grep -q "^matrix-traefik$"; then
-            docker restart matrix-traefik
+            #docker restart matrix-traefik
+            systemctl restart matrix-traefik
             log "Traefik перезапущен"
         else
             warn "Контейнер matrix-traefik не найден"
