@@ -442,6 +442,11 @@ class ExpireBot:
         self._decrypt_fail_since: float = 0.0
         self._e2e_reset_threshold = 5  # unique failing sessions
         self._e2e_reset_window = 120  # seconds
+        # Retry queue: event_id → {room_id, session_id, sender, attempts, next_retry}
+        self._decrypt_retry_queue: dict[str, dict] = {}
+        self._decrypt_retry_task: asyncio.Task | None = None
+        self._decrypt_max_retries = 3
+        self._decrypt_retry_delays = [15, 30, 60]  # seconds between retries
 
     # ─── Session persistence (device_id for E2E) ──────────────────────────
 
@@ -698,8 +703,8 @@ class ExpireBot:
             logger.info(f"Permissions restored in {room.room_id}")
 
     async def _on_megolm(self, room: MatrixRoom, event: MegolmEvent):
-        """Handle encrypted messages we can't decrypt — request missing keys.
-        If too many unique sessions fail in a short window, nuke E2E store and restart.
+        """Handle encrypted messages we can't decrypt — request missing keys,
+        queue for retry decryption, nuke E2E store as last resort.
         """
         if self._first_sync:
             return
@@ -714,6 +719,19 @@ class ExpireBot:
                 logger.info(f"Requested room key for session {event.session_id} in {room.room_id}")
         except Exception as e:
             logger.debug(f"Key request failed: {e}")
+
+        # Queue for retry decryption (key may arrive later)
+        if event.event_id not in self._decrypt_retry_queue:
+            delay = self._decrypt_retry_delays[0] if self._decrypt_retry_delays else 15
+            self._decrypt_retry_queue[event.event_id] = {
+                "room_id": room.room_id,
+                "session_id": event.session_id,
+                "sender": event.sender,
+                "attempts": 0,
+                "next_retry": time.time() + delay,
+            }
+            logger.info(f"Queued {event.event_id} for retry decryption in {delay}s")
+            self._ensure_retry_worker()
 
         # Track unique failing sessions for auto-recovery
         now = time.time()
@@ -731,6 +749,81 @@ class ExpireBot:
                 f"in {int(now - self._decrypt_fail_since)}s — nuking E2E store and restarting"
             )
             await self._nuke_e2e_and_restart()
+
+    def _ensure_retry_worker(self):
+        """Start the retry decryption worker if not already running."""
+        if self._decrypt_retry_task is None or self._decrypt_retry_task.done():
+            self._decrypt_retry_task = asyncio.ensure_future(self._retry_decrypt_worker())
+
+    async def _retry_decrypt_worker(self):
+        """Background worker: periodically retry decryption of queued events."""
+        while self._decrypt_retry_queue and not self._shutdown:
+            now = time.time()
+            next_wake = now + 60  # default sleep
+
+            to_remove = []
+            for event_id, info in list(self._decrypt_retry_queue.items()):
+                if now < info["next_retry"]:
+                    next_wake = min(next_wake, info["next_retry"])
+                    continue
+
+                info["attempts"] += 1
+                attempt = info["attempts"]
+                room_id = info["room_id"]
+
+                logger.info(
+                    f"Retry decrypt #{attempt} for {event_id} in {room_id}"
+                )
+
+                # Fetch event from server and try to decrypt
+                success = False
+                try:
+                    resp = await self.client.room_get_event(room_id, event_id)
+                    if hasattr(resp, "event") and resp.event:
+                        evt = resp.event
+                        if hasattr(evt, "source") and self.client.olm:
+                            decrypted = self.client.decrypt_event(evt)
+                            if decrypted and not isinstance(decrypted, MegolmEvent):
+                                logger.info(
+                                    f"Retry decrypt SUCCESS for {event_id} "
+                                    f"(attempt {attempt})"
+                                )
+                                success = True
+                                # Clear this session from failure tracking
+                                self._decrypt_fail_sessions.discard(info["session_id"])
+                except Exception as e:
+                    logger.debug(f"Retry decrypt error for {event_id}: {e}")
+
+                if success or attempt >= self._decrypt_max_retries:
+                    if not success:
+                        logger.warning(
+                            f"Giving up on {event_id} after {attempt} retries"
+                        )
+                    to_remove.append(event_id)
+                else:
+                    # Schedule next retry with increasing delay
+                    delay_idx = min(attempt, len(self._decrypt_retry_delays) - 1)
+                    delay = self._decrypt_retry_delays[delay_idx]
+                    info["next_retry"] = now + delay
+                    next_wake = min(next_wake, info["next_retry"])
+
+            for eid in to_remove:
+                self._decrypt_retry_queue.pop(eid, None)
+
+            # If all retries exhausted and none succeeded — E2E is broken, nuke
+            if to_remove and not self._decrypt_retry_queue:
+                # Check if any succeeded (fail_sessions would be cleared)
+                if self._decrypt_fail_sessions:
+                    logger.error(
+                        f"All retry attempts failed for {len(self._decrypt_fail_sessions)} session(s) "
+                        f"— nuking E2E store and restarting"
+                    )
+                    await self._nuke_e2e_and_restart()
+                    return
+
+            if self._decrypt_retry_queue:
+                sleep_for = max(1, next_wake - time.time())
+                await asyncio.sleep(sleep_for)
 
     async def _nuke_e2e_and_restart(self):
         """Delete E2E store and exit. Docker restart will re-login with fresh device."""
@@ -776,6 +869,12 @@ class ExpireBot:
         # Successful decrypt — reset E2E failure counters
         self._decrypt_fail_sessions.clear()
         self._decrypt_fail_since = 0.0
+        # Clear retry queue entries for this room (keys arrived)
+        if self._decrypt_retry_queue:
+            to_clear = [eid for eid, info in self._decrypt_retry_queue.items()
+                        if info["room_id"] == room.room_id]
+            for eid in to_clear:
+                self._decrypt_retry_queue.pop(eid, None)
         try:
             await self.db.ensure_connected()
             retention = await self.db.get_retention(room.room_id)
