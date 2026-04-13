@@ -3,9 +3,9 @@
 # Matrix Server — интерактивный генератор vars.yml
 # =============================================================================
 # Запуск из корня плейбука:
-#   bash tools/generate_vars.sh
-#   bash tools/generate_vars.sh --output /path/to/vars.yml
-#   bash tools/generate_vars.sh --dry-run
+#   bash tools/generate-vars.sh
+#   bash tools/generate-vars.sh --output /path/to/vars.yml
+#   bash tools/generate-vars.sh --dry-run
 # =============================================================================
 
 set -euo pipefail
@@ -22,7 +22,7 @@ NC='\033[0m'
 
 # --- Вывод ---
 log()     { echo -e "${GREEN}[+]${NC} $*"; }
-warn()    { echo -e "${YELLOW}[!]${NC} $*" >&2; }
+warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
 err()     { echo -e "${RED}[x]${NC} $*" >&2; }
 info()    { echo -e "${BLUE}[i]${NC} $*"; }
 header()  { echo ""; echo -e "${BOLD}${CYAN}=== $* ===${NC}"; echo ""; }
@@ -41,7 +41,7 @@ while [[ $# -gt 0 ]]; do
         --output|-o)       OUTPUT_FILE="$2"; shift 2 ;;
         --dry-run|-n)      DRY_RUN=true; shift ;;
         -h|--help)
-            echo "Использование: generate_vars.sh [ОПЦИИ]"
+            echo "Использование: generate-vars.sh [ОПЦИИ]"
             echo ""
             echo "Опции:"
             echo "  --playbook-dir, -p PATH  Путь к корню плейбука (обязательно или автоопределение)"
@@ -51,8 +51,8 @@ while [[ $# -gt 0 ]]; do
             echo "  -h, --help               Показать эту справку"
             echo ""
             echo "Примеры:"
-            echo "  bash generate_vars.sh -p /opt/matrix-docker-ansible-deploy"
-            echo "  bash generate_vars.sh --dry-run -p /opt/matrix-docker-ansible-deploy"
+            echo "  bash generate-vars.sh -p /opt/matrix-docker-ansible-deploy"
+            echo "  bash generate-vars.sh --dry-run -p /opt/matrix-docker-ansible-deploy"
             exit 0
             ;;
         *) err "Неизвестный параметр: $1"; exit 1 ;;
@@ -219,12 +219,6 @@ ask_multi() {
 }
 
 # Генерация секрета
-# Экранирование одинарных кавычек для YAML single-quoted строк
-# "Don't stop" → "Don''t stop"
-yaml_sq() {
-    echo "${1//\'/\'\'}"
-}
-
 gen_secret() {
     local len="${1:-64}"
     if command -v pwgen &>/dev/null; then
@@ -535,7 +529,6 @@ LIVEKIT_RTC_TCP=""
 LIVEKIT_RTC_UDP=""
 LIVEKIT_TURN_TLS=""
 LIVEKIT_TURN_UDP=""
-LIVEKIT_RANDOMIZE_PORTS=false
 SYNAPSE_ADMIN=false
 SYNAPSE_ADMIN_PATH=""
 SYNAPSE_ADMIN_PORT=""
@@ -561,17 +554,14 @@ if ask_yn "Включить аудио/видео звонки?" "y"; then
     divider
 
     # --- Настройка портов LiveKit ---
-    info "Стандартные порты LiveKit:"
-    info "  ICE/TCP: ${BOLD}7881${NC}, ICE/UDP: ${BOLD}7882${NC}"
-    info "  TURN/TLS: ${BOLD}5350${NC}, TURN/UDP: ${BOLD}3479${NC} (не конфликтуют с Coturn)"
+    info "По умолчанию LiveKit использует стандартные порты:"
+    info "  ICE/TCP: ${BOLD}7881${NC}, ICE/UDP: ${BOLD}7882${NC}, TURN/TLS: ${BOLD}5349${NC}, TURN/UDP: ${BOLD}3478${NC}"
     echo ""
     info "Рандомизация портов затрудняет обнаружение сервиса при сканировании"
     warn "От DPI это ${RED}не защищает${NC} — DPI анализирует содержимое, а не номер порта"
     echo ""
 
-    LIVEKIT_RANDOMIZE_PORTS=false
     if ask_yn "Рандомизировать порты LiveKit?" "y"; then
-        LIVEKIT_RANDOMIZE_PORTS=true
         # Генерируем 4 уникальных случайных порта (10000-49999)
         LIVEKIT_RTC_TCP=$((RANDOM % 40000 + 10000))
         LIVEKIT_RTC_UDP=$((RANDOM % 40000 + 10000))
@@ -592,32 +582,35 @@ if ask_yn "Включить аудио/видео звонки?" "y"; then
         LIVEKIT_RTC_UDP=$(ask_port "ICE/UDP порт" "$LIVEKIT_RTC_UDP")
         LIVEKIT_TURN_TLS=$(ask_port "TURN/TLS порт" "$LIVEKIT_TURN_TLS")
         LIVEKIT_TURN_UDP=$(ask_port "TURN/UDP порт" "$LIVEKIT_TURN_UDP")
-
-        echo ""
-        info "Порты LiveKit:"
-        echo -e "    ICE/TCP:  ${BOLD}${LIVEKIT_RTC_TCP}${NC}"
-        echo -e "    ICE/UDP:  ${BOLD}${LIVEKIT_RTC_UDP}${NC}"
-        echo -e "    TURN/TLS: ${BOLD}${LIVEKIT_TURN_TLS}${NC}"
-        echo -e "    TURN/UDP: ${BOLD}${LIVEKIT_TURN_UDP}${NC}"
     else
-        info "Используются стандартные порты (ICE: 7881/7882, TURN: 5350/3479)"
+        LIVEKIT_RTC_TCP=$(ask_port "ICE/TCP порт" "7881")
+        LIVEKIT_RTC_UDP=$(ask_port "ICE/UDP порт" "7882")
+        LIVEKIT_TURN_TLS=$(ask_port "TURN/TLS порт" "5349")
+        LIVEKIT_TURN_UDP=$(ask_port "TURN/UDP порт" "3478")
     fi
+
+    echo ""
+    info "Порты LiveKit:"
+    echo -e "    ICE/TCP:  ${BOLD}${LIVEKIT_RTC_TCP}${NC}"
+    echo -e "    ICE/UDP:  ${BOLD}${LIVEKIT_RTC_UDP}${NC}"
+    echo -e "    TURN/TLS: ${BOLD}${LIVEKIT_TURN_TLS}${NC}"
+    echo -e "    TURN/UDP: ${BOLD}${LIVEKIT_TURN_UDP}${NC}"
 fi
 
 divider
 
-# --- Ketesa ---
+# --- Ketesa (Admin Panel) ---
 info "Ketesa — ${BOLD}веб-панель управления${NC} сервером"
 info "Пользователи, комнаты, медиа, статистика"
 echo ""
 
-if ask_yn "Включить Ketesa?" "y"; then
+if ask_yn "Включить Ketesa (admin panel)?" "y"; then
     SYNAPSE_ADMIN=true
 
     if [[ "$USE_NGINX" == true ]]; then
         divider
         info "Варианты доступа к Ketesa:"
-        info "  ${BOLD}1)${NC} По пути: matrix.${DOMAIN}${BOLD}/ketesa${NC}"
+        info "  ${BOLD}1)${NC} По пути: matrix.${DOMAIN}${BOLD}/admin${NC}"
         info "  ${BOLD}2)${NC} На отдельном порту: matrix.${DOMAIN}${BOLD}:PORT${NC} (скрыт от сканеров)"
         echo ""
 
@@ -627,17 +620,17 @@ if ask_yn "Включить Ketesa?" "y"; then
             SYNAPSE_ADMIN_PORT=$(ask_port "Порт для Ketesa (через nginx)" "$SYNAPSE_ADMIN_PORT")
 
             info "Ketesa: ${BOLD}https://matrix.${DOMAIN}:${SYNAPSE_ADMIN_PORT}/${NC}"
-            info "Потребуется настройка nginx (см. prepare_server.sh)"
+            info "Потребуется настройка nginx (см. prepare-server.sh)"
         else
-            info "Путь по умолчанию: ${BOLD}/ketesa${NC}"
+            info "Путь по умолчанию: ${BOLD}/admin${NC}"
             info "Можно изменить для безопасности (например: /my-secret-admin)"
-            SYNAPSE_ADMIN_PATH=$(ask "Путь Ketesa" "/ketesa")
+            SYNAPSE_ADMIN_PATH=$(ask "Путь Ketesa" "/admin")
         fi
     else
         # Traefik-only: только путь (без порта)
-        info "Путь по умолчанию: ${BOLD}matrix.${DOMAIN}/ketesa${NC}"
+        info "Путь по умолчанию: ${BOLD}matrix.${DOMAIN}/admin${NC}"
         info "Можно изменить для безопасности (например: /my-secret-admin)"
-        SYNAPSE_ADMIN_PATH=$(ask "Путь Ketesa" "/ketesa")
+        SYNAPSE_ADMIN_PATH=$(ask "Путь Ketesa" "/admin")
 
         info "Ketesa: ${BOLD}https://matrix.${DOMAIN}${SYNAPSE_ADMIN_PATH}${NC}"
     fi
@@ -661,7 +654,7 @@ if [[ "$MAS_ENABLED" == true ]]; then
             ELEMENT_ADMIN_PORT=$(ask_port "Порт для Element Admin (через nginx)" "$ELEMENT_ADMIN_PORT")
 
             info "Element Admin: ${BOLD}https://matrix.${DOMAIN}:${ELEMENT_ADMIN_PORT}/${NC}"
-            info "Потребуется настройка nginx (см. prepare_server.sh)"
+            info "Потребуется настройка nginx (см. prepare-server.sh)"
         else
             # Traefik-only: поддомен (по умолчанию admin.element.DOMAIN)
             info "По умолчанию: ${BOLD}admin.element.${DOMAIN}${NC}"
@@ -746,44 +739,6 @@ header "6/12  Веб-клиент"
 info "Element Web — основной клиент, включён по умолчанию"
 info "Доступен на: ${BOLD}element.${DOMAIN}${NC}"
 echo ""
-
-# --- Тема ---
-ELEMENT_THEME="dark"
-if ! ask_yn "Тёмная тема по умолчанию?" "y"; then
-    ELEMENT_THEME="light"
-fi
-
-# --- Кастомный брендинг ---
-ELEMENT_BRANDING=false
-ELEMENT_LOGO_URL=""
-ELEMENT_BG_URL=""
-ELEMENT_HEADLINE=""
-ELEMENT_SUBTITLE=""
-ELEMENT_FOOTER_TOS=""
-ELEMENT_FOOTER_STATUS=""
-
-if ask_yn "Настроить брендинг (логотип, фон, welcome-текст)?" "n"; then
-    ELEMENT_BRANDING=true
-    echo ""
-    info "Логотип и фон должны быть доступны по URL (https://...)"
-    info "Файлы можно положить в /var/www/matrix-landing/branding/ на сервере"
-    info "и использовать URL: https://matrix.${DOMAIN}/branding/filename.svg"
-    echo ""
-
-    ELEMENT_LOGO_URL=$(ask "URL логотипа (SVG/PNG)" "")
-    ELEMENT_BG_URL=$(ask "URL фоновой картинки (SVG/PNG, пусто = без фона)" "")
-
-    echo ""
-    ELEMENT_HEADLINE=$(yaml_sq "$(ask "Headline на странице входа" "")")
-    ELEMENT_SUBTITLE=$(yaml_sq "$(ask "Подзаголовок" "")")
-
-    echo ""
-    if ask_yn "Добавить ссылки внизу страницы входа (ToS, Status)?" "n"; then
-        ELEMENT_FOOTER_TOS=$(ask "URL Terms of Service" "https://matrix.${DOMAIN}/tos")
-        ELEMENT_FOOTER_STATUS=$(ask "URL статус-страницы (пусто = пропустить)" "")
-    fi
-fi
-
 log "Element Web будет доступен на element.${DOMAIN}"
 
 
@@ -901,7 +856,7 @@ if ask_yn "Настроить отправку email?" "n"; then
     SMTP_HOST=$(ask "SMTP хост" "smtp.example.com")
     SMTP_PORT=$(ask_port "SMTP порт" "587")
     SMTP_USER=$(ask "SMTP пользователь" "")
-    SMTP_PASS=$(yaml_sq "$(ask_secret "SMTP пароль" "")")
+    SMTP_PASS=$(ask_secret "SMTP пароль" "")
     SMTP_FROM=$(ask "Email отправителя" "matrix@${DOMAIN}")
 fi
 
@@ -1075,21 +1030,16 @@ CF_EMAIL=""
 CF_ZONE_TOKEN=""
 CF_DNS_TOKEN=""
 
-if [[ "$USE_NGINX" == true ]]; then
-    info "${DIM}Cloudflare DNS challenge — только для Traefik-only режима${NC}"
-    info "${DIM}В nginx режиме SSL управляется certbot (уже настроен)${NC}"
-else
-    info "${BOLD}Cloudflare proxy${NC} — скрывает реальный IP сервера"
-    info "Защита от DDoS, кеширование, маскировка от сканеров"
-    info "Требует: домен на Cloudflare, API-токены для DNS challenge"
-    echo ""
+info "${BOLD}Cloudflare proxy${NC} — скрывает реальный IP сервера"
+info "Защита от DDoS, кеширование, маскировка от сканеров"
+info "Требует: домен на Cloudflare, API-токены для DNS challenge"
+echo ""
 
-    if ask_yn "Настроить Cloudflare DNS challenge (для SSL-сертификатов)?" "n"; then
-        CLOUDFLARE_ENABLED=true
-        CF_EMAIL=$(ask "Cloudflare email" "")
-        CF_ZONE_TOKEN=$(ask_secret "CF_ZONE_API_TOKEN" "")
-        CF_DNS_TOKEN=$(ask_secret "CF_DNS_API_TOKEN" "")
-    fi
+if ask_yn "Настроить Cloudflare DNS challenge (для SSL-сертификатов)?" "n"; then
+    CLOUDFLARE_ENABLED=true
+    CF_EMAIL=$(ask "Cloudflare email" "")
+    CF_ZONE_TOKEN=$(ask_secret "CF_ZONE_API_TOKEN" "")
+    CF_DNS_TOKEN=$(ask_secret "CF_DNS_API_TOKEN" "")
 fi
 
 
@@ -1146,9 +1096,6 @@ cat > "$OUTPUT_FILE" <<VARSEOF
 matrix_domain: ${DOMAIN}
 matrix_homeserver_implementation: ${HOMESERVER}
 
-# Авто-принятие миграций (плейбук не будет останавливаться на BC-изменениях)
-matrix_playbook_migration_validated_version: "{{ matrix_playbook_migration_expected_version }}"
-
 # Секрет для генерации остальных секретов (НЕЛЬЗЯ менять после деплоя!)
 matrix_homeserver_generic_secret_key: '${SECRET_KEY}'
 
@@ -1169,7 +1116,7 @@ if [[ "$DATA_PATH" != "/matrix" ]]; then
 cat >> "$OUTPUT_FILE" <<VARSEOF
 
 # Кастомный путь хранения данных (по умолчанию /matrix)
-matrix_base_data_path: '${DATA_PATH}'
+matrix_base_data_path: ${DATA_PATH}
 VARSEOF
 else
 cat >> "$OUTPUT_FILE" <<VARSEOF
@@ -1210,11 +1157,6 @@ traefik_certs_dumper_enabled: false
 # Traefik слушает только на localhost
 traefik_container_web_host_bind_port: '127.0.0.1:81'
 traefik_config_entrypoint_web_forwardedHeaders_insecure: true
-VARSEOF
-
-# Federation entrypoint: при federation на 443 — не нужен отдельный порт 8449
-if [[ "$FED_ON_443" != true ]]; then
-cat >> "$OUTPUT_FILE" <<VARSEOF
 
 # Federation entrypoint
 matrix_playbook_public_matrix_federation_api_traefik_entrypoint_host_bind_port: '127.0.0.1:8449'
@@ -1223,7 +1165,6 @@ matrix_playbook_public_matrix_federation_api_traefik_entrypoint_config_custom:
   forwardedHeaders:
     insecure: true
 VARSEOF
-fi
 else
 cat >> "$OUTPUT_FILE" <<VARSEOF
 
@@ -1460,23 +1401,11 @@ VARSEOF
 
 cat >> "$OUTPUT_FILE" <<VARSEOF
 
-# Веб-фронт Element Call не нужен — клиенты используют встроенный
+# Звонки через Element Web (LiveKit бэкенд)
 matrix_element_call_enabled: false
-# Кнопка звонков в Element Web (использует LiveKit бэкенд)
-matrix_client_element_element_call_enabled: true
-
-# Включает стек RTC: LiveKit SFU, JWT-сервис, rtc_foci в .well-known
-matrix_rtc_enabled: true
 VARSEOF
 
-if [[ -n "$SERVER_IP" ]]; then
-cat >> "$OUTPUT_FILE" <<VARSEOF
-livekit_server_config_rtc_use_external_ip: true
-livekit_server_config_rtc_node_ip: '${SERVER_IP}'
-VARSEOF
-fi
-
-if [[ "$LIVEKIT_RANDOMIZE_PORTS" == true ]]; then
+if [[ -n "$LIVEKIT_RTC_TCP" ]]; then
 cat >> "$OUTPUT_FILE" <<VARSEOF
 
 # Порты LiveKit (рандомизированные — защита от сканеров)
@@ -1484,50 +1413,26 @@ livekit_server_config_rtc_tcp_port: ${LIVEKIT_RTC_TCP}
 livekit_server_config_rtc_udp_port: ${LIVEKIT_RTC_UDP}
 livekit_server_config_turn_tls_port: ${LIVEKIT_TURN_TLS}
 livekit_server_config_turn_udp_port: ${LIVEKIT_TURN_UDP}
-VARSEOF
-fi
-
-# Таймауты, кодеки — всегда пишем
-cat >> "$OUTPUT_FILE" <<'VARSEOF'
-
-# Таймауты LiveKit (без них звонок "зависает" после отключения клиента)
-livekit_server_config_room_auto_create: false
-livekit_server_configuration_extension_yaml: |
-  room:
-    empty_timeout: 30
-    departure_timeout: 30
-    enabled_codecs:
-      - mime: audio/opus
-      - mime: video/vp8
+livekit_server_config_rtc_use_external_ip: true
 VARSEOF
 
-# nginx+Traefik: Traefik без ACME → LiveKit TURN терминирует TLS сам (certbot серты)
-# Traefik-only: Traefik имеет ACME → external_tls=true (по умолчанию), не трогаем
-if [[ "$USE_NGINX" == true ]]; then
+if [[ -n "$SERVER_IP" ]]; then
 cat >> "$OUTPUT_FILE" <<VARSEOF
-
-# LiveKit TURN — certbot серты (nginx+Traefik: Traefik не имеет ACME)
-livekit_server_config_turn_enabled: true
-livekit_server_config_turn_external_tls: false
-livekit_server_config_turn_cert_file: /certs/fullchain.pem
-livekit_server_config_turn_key_file: /certs/privkey.pem
-livekit_server_container_additional_volumes_custom:
-  - src: ${DATA_PATH}/livekit-server/certs
-    dst: /certs
-    options: ro
+livekit_server_config_rtc_node_ip: '${SERVER_IP}'
 VARSEOF
 fi
 fi
+fi
 
 
-# --- Ketesa ---
+# --- Ketesa (Admin Panel) ---
 if [[ "$SYNAPSE_ADMIN" == true ]]; then
 if [[ "$SYNAPSE_ADMIN_ON_PORT" == true ]]; then
 cat >> "$OUTPUT_FILE" <<VARSEOF
 
 
 # -----------------------------------------------------------------------------
-# Ketesa (matrix.${DOMAIN}:${SYNAPSE_ADMIN_PORT})
+# Ketesa — Admin Panel (matrix.${DOMAIN}:${SYNAPSE_ADMIN_PORT})
 # -----------------------------------------------------------------------------
 
 matrix_ketesa_enabled: true
@@ -1539,13 +1444,13 @@ cat >> "$OUTPUT_FILE" <<VARSEOF
 
 
 # -----------------------------------------------------------------------------
-# Ketesa (matrix.${DOMAIN}${SYNAPSE_ADMIN_PATH})
+# Ketesa — Admin Panel (matrix.${DOMAIN}${SYNAPSE_ADMIN_PATH})
 # -----------------------------------------------------------------------------
 
 matrix_ketesa_enabled: true
 VARSEOF
 
-if [[ "$SYNAPSE_ADMIN_PATH" != "/ketesa" ]]; then
+if [[ "$SYNAPSE_ADMIN_PATH" != "/" ]]; then
 cat >> "$OUTPUT_FILE" <<VARSEOF
 matrix_ketesa_path_prefix: ${SYNAPSE_ADMIN_PATH}
 VARSEOF
@@ -1672,34 +1577,7 @@ coturn_container_stun_tls_host_bind_port_udp: '${COTURN_TURNS_PORT}'
 coturn_turn_udp_min_port: ${COTURN_RELAY_MIN}
 coturn_turn_udp_max_port: ${COTURN_RELAY_MAX}
 VARSEOF
-
-# Кастомные порты → TURN URIs с портами (плейбук не добавляет порты автоматически)
-cat >> "$OUTPUT_FILE" <<VARSEOF
-
-# TURN URIs с нестандартными портами (плейбук не добавляет порты автоматически)
-matrix_synapse_turn_uris:
-  - 'turns:matrix.${DOMAIN}:${COTURN_TURNS_PORT}?transport=udp'
-  - 'turns:matrix.${DOMAIN}:${COTURN_TURNS_PORT}?transport=tcp'
-  - 'turn:matrix.${DOMAIN}:${COTURN_STUN_PORT}?transport=udp'
-  - 'turn:matrix.${DOMAIN}:${COTURN_STUN_PORT}?transport=tcp'
-VARSEOF
-
 fi
-
-# Coturn TLS серты (nginx+Traefik: Traefik без ACME)
-if [[ "$USE_NGINX" == true ]]; then
-cat >> "$OUTPUT_FILE" <<VARSEOF
-
-# Coturn TLS — certbot серты (nginx+Traefik: Traefik не имеет ACME)
-coturn_tls_cert_path: /certs/fullchain.pem
-coturn_tls_key_path: /certs/privkey.pem
-coturn_container_additional_volumes:
-  - src: ${DATA_PATH}/coturn/certs
-    dst: /certs
-    options: ro
-VARSEOF
-fi
-
 fi
 
 
@@ -1762,22 +1640,29 @@ matrix_media_repo_enabled: true
 # ID файлового хранилища (НЕЛЬЗЯ менять после сохранения медиа!)
 matrix_media_repo_datastore_file_id: '${MEDIA_REPO_DATASTORE_ID}'
 
-VARSEOF
-
-# Rate limit media-repo: nginx уже лимитирует, дублировать не нужно
-if [[ "$USE_NGINX" == true ]]; then
-    cat >> "$VARS_FILE" <<'VARSEOF'
-
-# Rate limit media-repo отключён (nginx уже ограничивает limit_rate)
+# Rate limit для media-repo (дефолт 1 req/s слишком жёсткий для клиентов)
 matrix_media_repo_rate_limit_enabled: false
 VARSEOF
-else
-    cat >> "$VARS_FILE" <<'VARSEOF'
 
-# Rate limit media-repo (без nginx — единственная защита)
-matrix_media_repo_rate_limit_requests_per_second: 10
-matrix_media_repo_rate_limit_burst: 50
+# Если companion имеет explicit priority (federation на 443 с nginx),
+# media-repo роутеры должны иметь priority выше, иначе companion перехватит media запросы
+if [[ "$FED_ON_443" == true && "$USE_NGINX" == true ]]; then
+cat >> "$OUTPUT_FILE" <<VARSEOF
+
+# Приоритеты media-repo роутеров (должны быть выше companion priority=1000,
+# иначе /_matrix/media уходит в Synapse, где media_repo отключён → 404)
+matrix_media_repo_container_labels_traefik_media_priority: 2000
+matrix_media_repo_container_labels_traefik_client_matrix_client_media_priority: 2000
+matrix_media_repo_container_labels_traefik_media_federation_priority: 2000
+matrix_media_repo_container_labels_traefik_federation_matrix_federation_media_priority: 2000
+matrix_media_repo_container_labels_traefik_logout_priority: 2000
+matrix_media_repo_container_labels_traefik_admin_priority: 2000
+matrix_media_repo_container_labels_traefik_t2bot_priority: 2000
+matrix_media_repo_container_labels_traefik_logout_federation_priority: 2000
+matrix_media_repo_container_labels_traefik_admin_federation_priority: 2000
+matrix_media_repo_container_labels_traefik_t2bot_federation_priority: 2000
 VARSEOF
+fi
 fi
 
 
@@ -1974,12 +1859,6 @@ fi
 
 # Federation на порт 443
 if [[ "$FED_ON_443" == true ]]; then
-    # nginx: federation через web entrypoint; Traefik-only: через web-secure
-    if [[ "$USE_NGINX" == true ]]; then
-        FED_ENTRYPOINT="web"
-    else
-        FED_ENTRYPOINT="web-secure"
-    fi
 cat >> "$OUTPUT_FILE" <<VARSEOF
 
 # Federation на порт 443 (маскировка под обычный HTTPS)
@@ -1987,11 +1866,20 @@ matrix_synapse_http_listener_resource_names: ["client","federation"]
 matrix_federation_public_port: 443
 matrix_synapse_federation_port_enabled: false
 matrix_synapse_tls_federation_listener_enabled: false
-
-# Все federation-роутеры (включая media-repo) через entrypoint ${FED_ENTRYPOINT}
-# (entrypoint matrix-federation не существует при federation на 443)
-matrix_federation_traefik_entrypoint_name: ${FED_ENTRYPOINT}
 VARSEOF
+
+# С nginx: federation идёт через тот же entrypoint (web), нужен explicit priority
+if [[ "$USE_NGINX" == true ]]; then
+cat >> "$OUTPUT_FILE" <<VARSEOF
+
+# Federation через nginx → traefik web entrypoint (не отдельный порт 8449)
+matrix_federation_traefik_entrypoint_name: web
+
+# Companion priority: без него traefik не может определить куда слать /_matrix
+# (federation и client API на одном entrypoint)
+matrix_synapse_reverse_proxy_companion_container_labels_public_client_api_traefik_priority: 1000
+VARSEOF
+fi
 fi
 
 # Cloudflare DNS challenge
@@ -2012,71 +1900,6 @@ traefik_environment_variables: |
   LEGO_DISABLE_CNAME_SUPPORT=true
 VARSEOF
 fi
-
-
-# --- Element Web: брендинг ---
-cat >> "$OUTPUT_FILE" <<VARSEOF
-
-# -----------------------------------------------------------------------------
-# Element Web — внешний вид
-# -----------------------------------------------------------------------------
-
-# Тема по умолчанию
-matrix_client_element_default_theme: '${ELEMENT_THEME}'
-VARSEOF
-
-if [[ "$ELEMENT_BRANDING" == true ]]; then
-
-if [[ -n "$ELEMENT_LOGO_URL" ]]; then
-cat >> "$OUTPUT_FILE" <<VARSEOF
-
-# Логотип
-matrix_client_element_welcome_logo: '${ELEMENT_LOGO_URL}'
-matrix_client_element_welcome_logo_link: 'https://${DOMAIN}'
-matrix_client_element_branding_auth_header_logo_url: '${ELEMENT_LOGO_URL}'
-VARSEOF
-fi
-
-if [[ -n "$ELEMENT_BG_URL" ]]; then
-cat >> "$OUTPUT_FILE" <<VARSEOF
-
-# Фон страницы входа
-matrix_client_element_branding_welcome_background_url: '${ELEMENT_BG_URL}'
-VARSEOF
-fi
-
-if [[ -n "$ELEMENT_HEADLINE" ]]; then
-cat >> "$OUTPUT_FILE" <<VARSEOF
-
-# Welcome-текст
-matrix_client_element_welcome_headline: '${ELEMENT_HEADLINE}'
-VARSEOF
-fi
-
-if [[ -n "$ELEMENT_SUBTITLE" ]]; then
-cat >> "$OUTPUT_FILE" <<VARSEOF
-matrix_client_element_welcome_text: '${ELEMENT_SUBTITLE}'
-VARSEOF
-fi
-
-# Footer links
-if [[ -n "$ELEMENT_FOOTER_TOS" ]] || [[ -n "$ELEMENT_FOOTER_STATUS" ]]; then
-cat >> "$OUTPUT_FILE" <<VARSEOF
-
-# Ссылки внизу страницы входа
-matrix_client_element_branding_auth_footer_links:
-VARSEOF
-
-[[ -n "$ELEMENT_FOOTER_TOS" ]] && cat >> "$OUTPUT_FILE" <<VARSEOF
-  - {"text": "Terms of Service", "url": "${ELEMENT_FOOTER_TOS}"}
-VARSEOF
-
-[[ -n "$ELEMENT_FOOTER_STATUS" ]] && cat >> "$OUTPUT_FILE" <<VARSEOF
-  - {"text": "Status", "url": "${ELEMENT_FOOTER_STATUS}"}
-VARSEOF
-fi
-
-fi  # ELEMENT_BRANDING
 
 
 # =============================================================================
@@ -2157,11 +1980,7 @@ ENABLED_COUNT=0
 echo -e "  ${BOLD}Сервисы:${NC}   ${ENABLED_COUNT} включено"
 echo -e "  ${BOLD}Мосты:${NC}     ${#SELECTED_BRIDGES[@]}"
 echo -e "  ${BOLD}Боты:${NC}      ${#SELECTED_BOTS[@]}"
-if [[ "$ELEMENT_BRANDING" == true ]]; then
-    echo -e "  ${BOLD}Клиенты:${NC}   Element Web (${GREEN}кастомный брендинг${NC})"
-else
-    echo -e "  ${BOLD}Клиенты:${NC}   Element Web"
-fi
+echo -e "  ${BOLD}Клиенты:${NC}   Element Web"
 echo ""
 
 # Ключевые параметры
@@ -2194,9 +2013,9 @@ else
 fi
 if [[ "$SYNAPSE_ADMIN" == true ]]; then
     if [[ "$SYNAPSE_ADMIN_ON_PORT" == true ]]; then
-        echo -e "    Syn Admin:   ${GREEN}matrix.${DOMAIN}:${SYNAPSE_ADMIN_PORT}${NC}"
+        echo -e "    Ketesa:   ${GREEN}matrix.${DOMAIN}:${SYNAPSE_ADMIN_PORT}${NC}"
     else
-        echo -e "    Syn Admin:   ${GREEN}matrix.${DOMAIN}${SYNAPSE_ADMIN_PATH}${NC}"
+        echo -e "    Ketesa:   ${GREEN}matrix.${DOMAIN}${SYNAPSE_ADMIN_PATH}${NC}"
     fi
 fi
 if [[ "$ELEMENT_ADMIN_ENABLED" == true ]]; then
@@ -2253,7 +2072,7 @@ if [[ "$SYNAPSE_ADMIN" == true ]]; then
     if [[ "$SYNAPSE_ADMIN_ON_PORT" == true ]]; then
         echo -e "                                        + :${SYNAPSE_ADMIN_PORT} (Ketesa)"
     else
-        echo -e "                                        + ${SYNAPSE_ADMIN_PATH:-/ketesa}"
+        echo -e "                                        + ${SYNAPSE_ADMIN_PATH:-/synapse-admin}"
     fi
 fi
 echo -e "    element.${DOMAIN}                — Element Web"
@@ -2268,21 +2087,15 @@ if [[ "$DRY_RUN" != true ]]; then
     if [[ "$LOCAL_DEPLOY" == true ]]; then
         echo "    1. Настрой DNS записи (все поддомены → IP сервера)"
         if [[ "$USE_NGINX" == true ]]; then
-            _prepare_cmd="bash tools/prepare_server.sh --domain ${DOMAIN}"
-            [[ -n "$SYNAPSE_ADMIN_PORT" ]] && _prepare_cmd="${_prepare_cmd} --ketesa-port ${SYNAPSE_ADMIN_PORT}"
+            _prepare_cmd="bash tools/prepare-server.sh --domain ${DOMAIN}"
+            [[ -n "$SYNAPSE_ADMIN_PORT" ]] && _prepare_cmd="${_prepare_cmd} --synapse-admin-port ${SYNAPSE_ADMIN_PORT}"
             [[ -n "$ELEMENT_ADMIN_PORT" ]] && _prepare_cmd="${_prepare_cmd} --element-admin-port ${ELEMENT_ADMIN_PORT}"
             [[ "$NTFY" == true ]] && _prepare_cmd="${_prepare_cmd} --with-ntfy"
-            [[ "$FED_ON_443" == true ]] && _prepare_cmd="${_prepare_cmd} --federation-on-443"
-            [[ "$TLS13_ONLY" == true ]] && _prepare_cmd="${_prepare_cmd} --tls13-only"
-            [[ "$DATA_PATH" != "/matrix" ]] && _prepare_cmd="${_prepare_cmd} --data-path ${DATA_PATH}"
-            [[ "$LIVEKIT_RANDOMIZE_PORTS" == true ]] && _prepare_cmd="${_prepare_cmd} --livekit-turn-tls ${LIVEKIT_TURN_TLS} --livekit-turn-udp ${LIVEKIT_TURN_UDP}"
-            [[ "$RANDOMIZE_COTURN_PORTS" == true ]] && _prepare_cmd="${_prepare_cmd} --coturn-stun ${COTURN_STUN_PORT} --coturn-turns ${COTURN_TURNS_PORT}"
-            _prepare_cmd="${_prepare_cmd} --with-landing-page"
             echo "    2. Подготовь сервер:"
             echo "         ${_prepare_cmd}"
             echo "    3. Запусти деплой:"
         else
-            _prepare_cmd="bash tools/prepare_server.sh --domain ${DOMAIN} --traefik-only"
+            _prepare_cmd="bash tools/prepare-server.sh --domain ${DOMAIN} --traefik-only"
             [[ "$NTFY" == true ]] && _prepare_cmd="${_prepare_cmd} --with-ntfy"
             echo "    2. Подготовь сервер:"
             echo "         ${_prepare_cmd}"
@@ -2305,21 +2118,12 @@ if [[ "$DRY_RUN" != true ]]; then
     else
         echo "    1. Настрой DNS записи (все поддомены → IP сервера)"
         if [[ "$USE_NGINX" == true ]]; then
-            _prepare_cmd_r="bash prepare_server.sh --domain ${DOMAIN}"
-            [[ -n "$SYNAPSE_ADMIN_PORT" ]] && _prepare_cmd_r="${_prepare_cmd_r} --ketesa-port ${SYNAPSE_ADMIN_PORT}"
+            _prepare_cmd_r="bash prepare-server.sh --domain ${DOMAIN}"
+            [[ -n "$SYNAPSE_ADMIN_PORT" ]] && _prepare_cmd_r="${_prepare_cmd_r} --synapse-admin-port ${SYNAPSE_ADMIN_PORT}"
             [[ -n "$ELEMENT_ADMIN_PORT" ]] && _prepare_cmd_r="${_prepare_cmd_r} --element-admin-port ${ELEMENT_ADMIN_PORT}"
-            [[ "$NTFY" == true ]] && _prepare_cmd_r="${_prepare_cmd_r} --with-ntfy"
-            [[ "$FED_ON_443" == true ]] && _prepare_cmd_r="${_prepare_cmd_r} --federation-on-443"
-            [[ "$TLS13_ONLY" == true ]] && _prepare_cmd_r="${_prepare_cmd_r} --tls13-only"
-            [[ "$DATA_PATH" != "/matrix" ]] && _prepare_cmd_r="${_prepare_cmd_r} --data-path ${DATA_PATH}"
-            [[ "$LIVEKIT_RANDOMIZE_PORTS" == true ]] && _prepare_cmd_r="${_prepare_cmd_r} --livekit-turn-tls ${LIVEKIT_TURN_TLS} --livekit-turn-udp ${LIVEKIT_TURN_UDP}"
-            [[ "$RANDOMIZE_COTURN_PORTS" == true ]] && _prepare_cmd_r="${_prepare_cmd_r} --coturn-stun ${COTURN_STUN_PORT} --coturn-turns ${COTURN_TURNS_PORT}"
-            _prepare_cmd_r="${_prepare_cmd_r} --with-landing-page"
             echo "    2. На сервере: ${_prepare_cmd_r}"
         else
-            _prepare_cmd_r="bash prepare_server.sh --domain ${DOMAIN} --traefik-only"
-            [[ "$NTFY" == true ]] && _prepare_cmd_r="${_prepare_cmd_r} --with-ntfy"
-            echo "    2. На сервере: ${_prepare_cmd_r}"
+            echo "    2. На сервере: bash prepare-server.sh --domain ${DOMAIN} --traefik-only"
         fi
         echo "    3. На управляющей машине:"
         echo "         cd ${PLAYBOOK_ROOT}"
