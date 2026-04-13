@@ -606,40 +606,40 @@ fi
 
 divider
 
-# --- Synapse Admin ---
-info "Synapse Admin — ${BOLD}веб-панель управления${NC} сервером"
+# --- Ketesa ---
+info "Ketesa — ${BOLD}веб-панель управления${NC} сервером"
 info "Пользователи, комнаты, медиа, статистика"
 echo ""
 
-if ask_yn "Включить Synapse Admin?" "y"; then
+if ask_yn "Включить Ketesa?" "y"; then
     SYNAPSE_ADMIN=true
 
     if [[ "$USE_NGINX" == true ]]; then
         divider
-        info "Варианты доступа к Synapse Admin:"
-        info "  ${BOLD}1)${NC} По пути: matrix.${DOMAIN}${BOLD}/synapse-admin${NC}"
+        info "Варианты доступа к Ketesa:"
+        info "  ${BOLD}1)${NC} По пути: matrix.${DOMAIN}${BOLD}/ketesa${NC}"
         info "  ${BOLD}2)${NC} На отдельном порту: matrix.${DOMAIN}${BOLD}:PORT${NC} (скрыт от сканеров)"
         echo ""
 
         if ask_yn "Вынести на отдельный порт (рекомендуется)?" "y"; then
             SYNAPSE_ADMIN_ON_PORT=true
             SYNAPSE_ADMIN_PORT=$((RANDOM % 40000 + 10000))
-            SYNAPSE_ADMIN_PORT=$(ask_port "Порт для Synapse Admin (через nginx)" "$SYNAPSE_ADMIN_PORT")
+            SYNAPSE_ADMIN_PORT=$(ask_port "Порт для Ketesa (через nginx)" "$SYNAPSE_ADMIN_PORT")
 
-            info "Synapse Admin: ${BOLD}https://matrix.${DOMAIN}:${SYNAPSE_ADMIN_PORT}/${NC}"
+            info "Ketesa: ${BOLD}https://matrix.${DOMAIN}:${SYNAPSE_ADMIN_PORT}/${NC}"
             info "Потребуется настройка nginx (см. prepare_server.sh)"
         else
-            info "Путь по умолчанию: ${BOLD}/synapse-admin${NC}"
+            info "Путь по умолчанию: ${BOLD}/ketesa${NC}"
             info "Можно изменить для безопасности (например: /my-secret-admin)"
-            SYNAPSE_ADMIN_PATH=$(ask "Путь Synapse Admin" "/synapse-admin")
+            SYNAPSE_ADMIN_PATH=$(ask "Путь Ketesa" "/ketesa")
         fi
     else
         # Traefik-only: только путь (без порта)
-        info "Путь по умолчанию: ${BOLD}matrix.${DOMAIN}/synapse-admin${NC}"
+        info "Путь по умолчанию: ${BOLD}matrix.${DOMAIN}/ketesa${NC}"
         info "Можно изменить для безопасности (например: /my-secret-admin)"
-        SYNAPSE_ADMIN_PATH=$(ask "Путь Synapse Admin" "/synapse-admin")
+        SYNAPSE_ADMIN_PATH=$(ask "Путь Ketesa" "/ketesa")
 
-        info "Synapse Admin: ${BOLD}https://matrix.${DOMAIN}${SYNAPSE_ADMIN_PATH}${NC}"
+        info "Ketesa: ${BOLD}https://matrix.${DOMAIN}${SYNAPSE_ADMIN_PATH}${NC}"
     fi
 fi
 
@@ -1146,6 +1146,9 @@ cat > "$OUTPUT_FILE" <<VARSEOF
 matrix_domain: ${DOMAIN}
 matrix_homeserver_implementation: ${HOMESERVER}
 
+# Авто-принятие миграций (плейбук не будет останавливаться на BC-изменениях)
+matrix_playbook_migration_validated_version: "{{ matrix_playbook_migration_expected_version }}"
+
 # Секрет для генерации остальных секретов (НЕЛЬЗЯ менять после деплоя!)
 matrix_homeserver_generic_secret_key: '${SECRET_KEY}'
 
@@ -1296,7 +1299,7 @@ VARSEOF
 elif [[ "$REGISTRATION" == true ]]; then
 cat >> "$OUTPUT_FILE" <<VARSEOF
 
-# Регистрация по пригласительным токенам (управление: Synapse Admin)
+# Регистрация по пригласительным токенам (управление: Ketesa)
 matrix_synapse_enable_registration: true
 matrix_synapse_registration_requires_token: true
 VARSEOF
@@ -1517,34 +1520,34 @@ fi
 fi
 
 
-# --- Synapse Admin ---
+# --- Ketesa ---
 if [[ "$SYNAPSE_ADMIN" == true ]]; then
 if [[ "$SYNAPSE_ADMIN_ON_PORT" == true ]]; then
 cat >> "$OUTPUT_FILE" <<VARSEOF
 
 
 # -----------------------------------------------------------------------------
-# Synapse Admin (matrix.${DOMAIN}:${SYNAPSE_ADMIN_PORT})
+# Ketesa (matrix.${DOMAIN}:${SYNAPSE_ADMIN_PORT})
 # -----------------------------------------------------------------------------
 
-matrix_synapse_admin_enabled: true
-matrix_synapse_admin_hostname: "synapse-admin.internal"
-matrix_synapse_admin_path_prefix: /
+matrix_ketesa_enabled: true
+matrix_ketesa_hostname: "ketesa.internal"
+matrix_ketesa_path_prefix: /
 VARSEOF
 else
 cat >> "$OUTPUT_FILE" <<VARSEOF
 
 
 # -----------------------------------------------------------------------------
-# Synapse Admin (matrix.${DOMAIN}${SYNAPSE_ADMIN_PATH})
+# Ketesa (matrix.${DOMAIN}${SYNAPSE_ADMIN_PATH})
 # -----------------------------------------------------------------------------
 
-matrix_synapse_admin_enabled: true
+matrix_ketesa_enabled: true
 VARSEOF
 
-if [[ "$SYNAPSE_ADMIN_PATH" != "/synapse-admin" ]]; then
+if [[ "$SYNAPSE_ADMIN_PATH" != "/ketesa" ]]; then
 cat >> "$OUTPUT_FILE" <<VARSEOF
-matrix_synapse_admin_path_prefix: ${SYNAPSE_ADMIN_PATH}
+matrix_ketesa_path_prefix: ${SYNAPSE_ADMIN_PATH}
 VARSEOF
 fi
 fi
@@ -2248,9 +2251,9 @@ echo -e "    ${DOMAIN}                        — заглушка + .well-known
 echo -e "    matrix.${DOMAIN}                 — Synapse homeserver"
 if [[ "$SYNAPSE_ADMIN" == true ]]; then
     if [[ "$SYNAPSE_ADMIN_ON_PORT" == true ]]; then
-        echo -e "                                        + :${SYNAPSE_ADMIN_PORT} (Synapse Admin)"
+        echo -e "                                        + :${SYNAPSE_ADMIN_PORT} (Ketesa)"
     else
-        echo -e "                                        + ${SYNAPSE_ADMIN_PATH:-/synapse-admin}"
+        echo -e "                                        + ${SYNAPSE_ADMIN_PATH:-/ketesa}"
     fi
 fi
 echo -e "    element.${DOMAIN}                — Element Web"
@@ -2266,7 +2269,7 @@ if [[ "$DRY_RUN" != true ]]; then
         echo "    1. Настрой DNS записи (все поддомены → IP сервера)"
         if [[ "$USE_NGINX" == true ]]; then
             _prepare_cmd="bash tools/prepare_server.sh --domain ${DOMAIN}"
-            [[ -n "$SYNAPSE_ADMIN_PORT" ]] && _prepare_cmd="${_prepare_cmd} --synapse-admin-port ${SYNAPSE_ADMIN_PORT}"
+            [[ -n "$SYNAPSE_ADMIN_PORT" ]] && _prepare_cmd="${_prepare_cmd} --ketesa-port ${SYNAPSE_ADMIN_PORT}"
             [[ -n "$ELEMENT_ADMIN_PORT" ]] && _prepare_cmd="${_prepare_cmd} --element-admin-port ${ELEMENT_ADMIN_PORT}"
             [[ "$NTFY" == true ]] && _prepare_cmd="${_prepare_cmd} --with-ntfy"
             [[ "$FED_ON_443" == true ]] && _prepare_cmd="${_prepare_cmd} --federation-on-443"
@@ -2303,7 +2306,7 @@ if [[ "$DRY_RUN" != true ]]; then
         echo "    1. Настрой DNS записи (все поддомены → IP сервера)"
         if [[ "$USE_NGINX" == true ]]; then
             _prepare_cmd_r="bash prepare_server.sh --domain ${DOMAIN}"
-            [[ -n "$SYNAPSE_ADMIN_PORT" ]] && _prepare_cmd_r="${_prepare_cmd_r} --synapse-admin-port ${SYNAPSE_ADMIN_PORT}"
+            [[ -n "$SYNAPSE_ADMIN_PORT" ]] && _prepare_cmd_r="${_prepare_cmd_r} --ketesa-port ${SYNAPSE_ADMIN_PORT}"
             [[ -n "$ELEMENT_ADMIN_PORT" ]] && _prepare_cmd_r="${_prepare_cmd_r} --element-admin-port ${ELEMENT_ADMIN_PORT}"
             [[ "$NTFY" == true ]] && _prepare_cmd_r="${_prepare_cmd_r} --with-ntfy"
             [[ "$FED_ON_443" == true ]] && _prepare_cmd_r="${_prepare_cmd_r} --federation-on-443"
