@@ -354,6 +354,12 @@ apply_update() {
         --tags=install-all,ensure-matrix-users-created,start
 
     log "Обновления применены"
+
+    # Гарантируем запуск всех сервисов (ansible может не стартовать всё)
+    info "Запуск всех сервисов..."
+    if command -v just &>/dev/null && [[ -f "${PLAYBOOK_ROOT}/justfile" ]]; then
+        just start-all 2>/dev/null || true
+    fi
 }
 
 
