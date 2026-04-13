@@ -312,6 +312,87 @@ update_roles() {
 
 
 # =============================================================================
+# Автопатчинг vars.yml (совместимость с новыми версиями плейбука)
+# =============================================================================
+
+patch_vars() {
+    step "Проверка vars.yml на совместимость"
+
+    [[ -z "$MATRIX_HOSTNAME" ]] && detect_domain
+    local vars_file="${PLAYBOOK_ROOT}/inventory/host_vars/${MATRIX_HOSTNAME}/vars.yml"
+
+    if [[ ! -f "$vars_file" ]]; then
+        warn "vars.yml не найден — пропуск"
+        return 0
+    fi
+
+    local patched=false
+
+    # --- Rename: matrix_synapse_admin_* → matrix_ketesa_* ---
+    if grep -q "^matrix_synapse_admin_" "$vars_file" 2>/dev/null; then
+        info "Переименование matrix_synapse_admin_* → matrix_ketesa_*"
+        if [[ "$DRY_RUN" != true ]]; then
+            sed -i 's/^matrix_synapse_admin_/matrix_ketesa_/' "$vars_file"
+            # hostname: synapse-admin.internal → ketesa.internal
+            sed -i 's/synapse-admin\.internal/ketesa.internal/' "$vars_file"
+            patched=true
+        else
+            log "DRY-RUN: sed matrix_synapse_admin_ → matrix_ketesa_"
+        fi
+    fi
+
+    # --- Rename: matrix_coturn_* → coturn_* ---
+    if grep -q "^matrix_coturn_" "$vars_file" 2>/dev/null; then
+        info "Переименование matrix_coturn_* → coturn_*"
+        if [[ "$DRY_RUN" != true ]]; then
+            sed -i 's/^matrix_coturn_/coturn_/' "$vars_file"
+            patched=true
+        else
+            log "DRY-RUN: sed matrix_coturn_ → coturn_"
+        fi
+    fi
+
+    # --- Fix: client API priority при federation на web entrypoint ---
+    if grep -q "matrix_federation_traefik_entrypoint_name:.*web" "$vars_file" 2>/dev/null; then
+        if ! grep -q "public_client_api_traefik_priority" "$vars_file" 2>/dev/null; then
+            info "Добавление приоритета client API (federation на web entrypoint)"
+            if [[ "$DRY_RUN" != true ]]; then
+                cat >> "$vars_file" <<'PATCHEOF'
+
+# Fix: client API и federation на одном entrypoint — без приоритета 502
+matrix_synapse_reverse_proxy_companion_container_labels_public_client_api_traefik_priority: 1000
+PATCHEOF
+                patched=true
+            else
+                log "DRY-RUN: добавление client_api_traefik_priority"
+            fi
+        fi
+    fi
+
+    # --- Migration auto-accept ---
+    if ! grep -q "matrix_playbook_migration_validated_version" "$vars_file" 2>/dev/null; then
+        info "Добавление авто-принятия миграций"
+        if [[ "$DRY_RUN" != true ]]; then
+            cat >> "$vars_file" <<'PATCHEOF'
+
+# Авто-принятие миграций (breaking changes)
+matrix_playbook_migration_validated_version: "{{ matrix_playbook_migration_expected_version }}"
+PATCHEOF
+            patched=true
+        else
+            log "DRY-RUN: добавление migration_validated_version"
+        fi
+    fi
+
+    if [[ "$patched" == true ]]; then
+        log "vars.yml пропатчен"
+    else
+        log "vars.yml актуален, патчи не нужны"
+    fi
+}
+
+
+# =============================================================================
 # Применение обновлений
 # =============================================================================
 
@@ -496,6 +577,12 @@ reload_proxy() {
         if [[ "$DRY_RUN" == true ]]; then
             log "DRY-RUN: nginx reload + traefik restart"
             return 0
+        fi
+
+        # Патч nginx: synapse-admin.internal → ketesa.internal
+        if grep -q 'synapse-admin\.internal' "$NGINX_CONF" 2>/dev/null; then
+            info "Переименование synapse-admin.internal → ketesa.internal в nginx"
+            sed -i 's/synapse-admin\.internal/ketesa.internal/' "$NGINX_CONF"
         fi
 
         if nginx -t 2>/dev/null; then
@@ -824,6 +911,10 @@ main() {
     # --- Обновление ---
     update_playbook
     update_roles
+
+    # --- Патчинг vars.yml ---
+    patch_vars
+
     apply_update
 
     # --- Определяем домен, режим и эндпоинты ---
