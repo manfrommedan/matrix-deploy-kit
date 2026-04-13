@@ -762,24 +762,24 @@ ELEMENT_SUBTITLE=""
 ELEMENT_FOOTER_TOS=""
 ELEMENT_FOOTER_STATUS=""
 
-if ask_yn "Настроить брендинг (заголовок, логотип, ссылки)?" "y"; then
+if ask_yn "Настроить брендинг (логотип, фон, welcome-текст)?" "n"; then
     ELEMENT_BRANDING=true
     echo ""
+    info "Логотип и фон должны быть доступны по URL (https://...)"
+    info "Файлы можно положить в /var/www/matrix-landing/branding/ на сервере"
+    info "и использовать URL: https://matrix.${DOMAIN}/branding/filename.svg"
+    echo ""
 
-    ELEMENT_HEADLINE=$(yaml_sq "$(ask "Headline на странице входа" "Welcome to Matrix")")
-    ELEMENT_SUBTITLE=$(yaml_sq "$(ask "Подзаголовок" "End-to-end encrypted. Self-hosted.")")
+    ELEMENT_LOGO_URL=$(ask "URL логотипа (SVG/PNG)" "")
+    ELEMENT_BG_URL=$(ask "URL фоновой картинки (SVG/PNG, пусто = без фона)" "")
 
     echo ""
-    if ask_yn "Свой логотип и фон?" "n"; then
-        info "Логотип и фон должны быть доступны по URL (https://...)"
-        echo ""
-        ELEMENT_LOGO_URL=$(ask "URL логотипа (SVG/PNG)" "")
-        ELEMENT_BG_URL=$(ask "URL фоновой картинки (SVG/PNG, пусто = стандартный)" "")
-    fi
+    ELEMENT_HEADLINE=$(yaml_sq "$(ask "Headline на странице входа" "")")
+    ELEMENT_SUBTITLE=$(yaml_sq "$(ask "Подзаголовок" "")")
 
     echo ""
-    if ask_yn "Добавить ссылки внизу (ToS, Status)?" "y"; then
-        ELEMENT_FOOTER_TOS=$(ask "URL Terms of Service" "https://matrix.${DOMAIN}/tos.html")
+    if ask_yn "Добавить ссылки внизу страницы входа (ToS, Status)?" "n"; then
+        ELEMENT_FOOTER_TOS=$(ask "URL Terms of Service" "https://matrix.${DOMAIN}/tos")
         ELEMENT_FOOTER_STATUS=$(ask "URL статус-страницы (пусто = пропустить)" "")
     fi
 fi
@@ -1991,10 +1991,6 @@ matrix_synapse_tls_federation_listener_enabled: false
 # Все federation-роутеры (включая media-repo) через entrypoint ${FED_ENTRYPOINT}
 # (entrypoint matrix-federation не существует при federation на 443)
 matrix_federation_traefik_entrypoint_name: ${FED_ENTRYPOINT}
-
-# Fix: client API и federation имеют одинаковый rule на одном entrypoint —
-# без приоритета federation побеждает и клиентские запросы идут на порт 8048 (502)
-matrix_synapse_reverse_proxy_companion_container_labels_public_client_api_traefik_priority: 1000
 VARSEOF
 fi
 
@@ -2061,22 +2057,6 @@ if [[ -n "$ELEMENT_SUBTITLE" ]]; then
 cat >> "$OUTPUT_FILE" <<VARSEOF
 matrix_client_element_welcome_text: '${ELEMENT_SUBTITLE}'
 VARSEOF
-fi
-
-# Кастомный welcome-шаблон (фикс цвета текста для тёмной темы)
-if [[ -n "$ELEMENT_HEADLINE" ]] || [[ -n "$ELEMENT_SUBTITLE" ]]; then
-    local TEMPLATE_SRC="${SCRIPT_DIR}/../templates/element-welcome.html"
-    local TEMPLATE_DST="${PLAYBOOK_ROOT}/templates/element-welcome.html"
-    if [[ -f "$TEMPLATE_SRC" ]]; then
-        mkdir -p "${PLAYBOOK_ROOT}/templates"
-        cp "$TEMPLATE_SRC" "$TEMPLATE_DST"
-        log "Скопирован welcome-шаблон → templates/element-welcome.html"
-cat >> "$OUTPUT_FILE" <<VARSEOF
-
-# Welcome шаблон (фикс цвета для тёмной/светлой темы)
-matrix_client_element_page_template_welcome_path: "{{ playbook_dir }}/templates/element-welcome.html"
-VARSEOF
-    fi
 fi
 
 # Footer links
