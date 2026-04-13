@@ -256,20 +256,20 @@ livekit_server_configuration_extension_yaml: |
 
 ---
 
-## 10. Synapse Admin
+## 10. Ketesa
 
 Веб-панель для управления сервером: пользователи, комнаты, медиа, статистика.
 
 ```yaml
-# Включить Synapse Admin
-matrix_synapse_admin_enabled: true
+# Включить Ketesa
+matrix_ketesa_enabled: true
 
-# По умолчанию доступен по: matrix.example.com/synapse-admin
+# По умолчанию доступен по: matrix.example.com/ketesa
 # Можно изменить путь:
-matrix_synapse_admin_path: /my-secret-admin
+matrix_ketesa_path: /my-secret-admin
 
 # В nginx-режиме: вынести на отдельный порт
-# (настраивается через prepare_server.sh --synapse-admin-port PORT)
+# (настраивается через prepare_server.sh --ketesa-port PORT)
 ```
 
 #### Доступ по внутреннему имени (nginx → Traefik)
@@ -278,7 +278,7 @@ matrix_synapse_admin_path: /my-secret-admin
 
 ```yaml
 # Внутренний роутинг через Traefik labels
-matrix_synapse_admin_container_labels_traefik_hostname: synapse-admin.internal
+matrix_ketesa_container_labels_traefik_hostname: ketesa.internal
 ```
 
 ---
@@ -310,7 +310,7 @@ Coturn — общий TURN для legacy VoIP, LiveKit TURN — для SFU-conne
 coturn_enabled: true
 
 # ОБЯЗАТЕЛЬНО: публичный IP твоего сервера
-matrix_coturn_turn_external_ip_address: '1.2.3.4'
+coturn_turn_external_ip_address: '1.2.3.4'
 
 # Порты STUN/TURN (стандартные)
 coturn_container_stun_plain_host_bind_port_tcp: 3478
@@ -325,8 +325,8 @@ coturn_container_stun_tls_host_bind_port_tcp: 37782
 coturn_container_stun_tls_host_bind_port_udp: 37782
 
 # Relay диапазон UDP
-matrix_coturn_container_stun_relay_min_port: 49152
-matrix_coturn_container_stun_relay_max_port: 49172
+coturn_container_stun_relay_min_port: 49152
+coturn_container_stun_relay_max_port: 49172
 ```
 
 ### Coturn TLS (nginx+Traefik режим)
@@ -677,7 +677,7 @@ matrix_federation_traefik_entrypoint_name: web  # nginx / web-secure для Trae
 
 # Рандомизация портов LiveKit и Coturn
 livekit_server_container_rtc_tcp_bind_port: 27483
-matrix_coturn_turn_udp_port: 39521
+coturn_turn_udp_port: 39521
 ```
 
 ### Регистрация по токенам
@@ -754,7 +754,7 @@ just run-tags register-user --extra-vars='username=USER password=PASS admin=yes'
 3.  Сеть и доступ (федерация, регистрация, гости)
 4.  MAS (аутентификация, ToS)
 5.  Element Web (клиент)
-6.  Synapse Admin
+6.  Ketesa
 7.  Element Admin
 8.  Звонки (LiveKit, порты)
 9.  Coturn (TURN/STUN)
