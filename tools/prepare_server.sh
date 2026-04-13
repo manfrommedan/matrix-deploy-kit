@@ -37,7 +37,7 @@ SKIP_NGINX=false
 SKIP_FAIL2BAN=true
 CERTBOT_EMAIL=""
 DRY_RUN=false
-SYNAPSE_ADMIN_PORT=""
+KETESA_PORT=""
 ELEMENT_ADMIN_PORT=""
 WITH_LANDING_PAGE=false
 WITH_NTFY=false
@@ -74,7 +74,7 @@ Reverse proxy (выбрать один):
 
 Опции (nginx режим):
   --email EMAIL             Email для certbot (по умолчанию admin@DOMAIN)
-  --synapse-admin-port PORT Порт для Synapse Admin (nginx → Traefik)
+  --ketesa-port PORT Порт для Ketesa (nginx → Traefik)
   --element-admin-port PORT Порт для Element Admin (nginx → Traefik)
   --with-landing-page       Создать landing page и ToS на matrix.DOMAIN
   --with-ntfy               Включить поддомен ntfy.DOMAIN (push-уведомления)
@@ -106,7 +106,7 @@ Reverse proxy (выбрать один):
 
 Примеры:
   # nginx режим (с admin-панелями на портах):
-  prepare_server.sh --domain example.com --synapse-admin-port 35805 --with-landing-page
+  prepare_server.sh --domain example.com --ketesa-port 35805 --with-landing-page
 
   # Traefik-only (SSL через Traefik ACME):
   prepare_server.sh --domain example.com --traefik-only
@@ -128,7 +128,7 @@ while [[ $# -gt 0 ]]; do
         --with-firewall)    SKIP_FIREWALL=false; shift ;;
         --with-ssh-hardening) SKIP_SSH_HARDENING=false; shift ;;
         --with-fail2ban)    SKIP_FAIL2BAN=false; shift ;;
-        --synapse-admin-port) SYNAPSE_ADMIN_PORT="$2"; shift 2 ;;
+        --ketesa-port) KETESA_PORT="$2"; shift 2 ;;
         --element-admin-port) ELEMENT_ADMIN_PORT="$2"; shift 2 ;;
         --with-landing-page)  WITH_LANDING_PAGE=true; shift ;;
         --with-ntfy)          WITH_NTFY=true; shift ;;
@@ -157,10 +157,10 @@ fi
 
 # Проверка: nginx-only опции не совместимы с --traefik-only
 if [[ "$PROXY_MODE" == "traefik" ]]; then
-    if [[ -n "$SYNAPSE_ADMIN_PORT" || -n "$ELEMENT_ADMIN_PORT" ]]; then
-        warn "Опции --synapse-admin-port / --element-admin-port работают только в nginx режиме."
+    if [[ -n "$KETESA_PORT" || -n "$ELEMENT_ADMIN_PORT" ]]; then
+        warn "Опции --ketesa-port / --element-admin-port работают только в nginx режиме."
         warn "В Traefik-only admin-панели доступны через пути/поддомены (настраивается в vars.yml)."
-        SYNAPSE_ADMIN_PORT=""
+        KETESA_PORT=""
         ELEMENT_ADMIN_PORT=""
     fi
     if [[ "$WITH_LANDING_PAGE" == true ]]; then
@@ -214,7 +214,7 @@ info "SSH порт: ${SSH_PORT}"
 if [[ "$PROXY_MODE" == "nginx" ]]; then
     info "Reverse proxy: nginx → Traefik (nginx терминирует SSL)"
     info "Certbot email: ${CERTBOT_EMAIL}"
-    [[ -n "$SYNAPSE_ADMIN_PORT" ]] && info "Synapse Admin порт: ${SYNAPSE_ADMIN_PORT}"
+    [[ -n "$KETESA_PORT" ]] && info "Ketesa порт: ${KETESA_PORT}"
     [[ -n "$ELEMENT_ADMIN_PORT" ]] && info "Element Admin порт: ${ELEMENT_ADMIN_PORT}"
     [[ "$WITH_LANDING_PAGE" == true ]] && info "Landing page: включена"
 else
@@ -378,7 +378,7 @@ if [[ "$SKIP_FIREWALL" == false ]]; then
     [[ -n "$LK_TURN_UDP" ]] && ufw allow "${LK_TURN_UDP}/udp" comment "LiveKit TURN UDP"
 
     # Admin-панели на отдельных портах
-    [[ -n "$SYNAPSE_ADMIN_PORT" ]] && ufw allow "${SYNAPSE_ADMIN_PORT}/tcp" comment "Synapse Admin"
+    [[ -n "$KETESA_PORT" ]] && ufw allow "${KETESA_PORT}/tcp" comment "Ketesa"
     [[ -n "$ELEMENT_ADMIN_PORT" ]] && ufw allow "${ELEMENT_ADMIN_PORT}/tcp" comment "Element Admin"
 
     # Включаем
@@ -1173,14 +1173,14 @@ ${_SN_REDIRECT}
 }
 NGINXEOF
 
-# --- Synapse Admin на отдельном порту ---
-if [[ -n "$SYNAPSE_ADMIN_PORT" ]]; then
+# --- Ketesa на отдельном порту ---
+if [[ -n "$KETESA_PORT" ]]; then
 cat <<NGINXEOF
 
-# --- HTTPS: Synapse Admin (порт ${SYNAPSE_ADMIN_PORT}) ---
+# --- HTTPS: Ketesa (порт ${KETESA_PORT}) ---
 server {
-    listen ${SYNAPSE_ADMIN_PORT} ssl http2;
-    listen [::]:${SYNAPSE_ADMIN_PORT} ssl http2;
+    listen ${KETESA_PORT} ssl http2;
+    listen [::]:${KETESA_PORT} ssl http2;
 
     server_name matrix.${DOMAIN};
 
@@ -1208,7 +1208,7 @@ $(_ssl_extra)
 
     location / {
         proxy_pass http://127.0.0.1:81;
-        proxy_set_header Host synapse-admin.internal;
+        proxy_set_header Host ketesa.internal;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$remote_addr;
         proxy_set_header X-Forwarded-Proto https;
@@ -1295,7 +1295,7 @@ else
     info "Режим Traefik-only: nginx и certbot не устанавливаются"
     info "Traefik сам управляет SSL через Let's Encrypt ACME"
     info "Admin-панели доступны через пути/поддомены (настраивается в vars.yml):"
-    info "  Synapse Admin: matrix.${DOMAIN}/synapse-admin (по умолчанию)"
+    info "  Ketesa: matrix.${DOMAIN}/ketesa (по умолчанию)"
     info "  Element Admin: admin.element.${DOMAIN}/ (по умолчанию)"
 fi  # SKIP_NGINX
 
@@ -1412,9 +1412,9 @@ echo "  Reverse proxy:    Traefik-only (SSL через Let's Encrypt ACME)"
 fi
 echo ""
 if [[ "$PROXY_MODE" == "nginx" ]]; then
-    if [[ -n "$SYNAPSE_ADMIN_PORT" || -n "$ELEMENT_ADMIN_PORT" ]]; then
+    if [[ -n "$KETESA_PORT" || -n "$ELEMENT_ADMIN_PORT" ]]; then
 echo "  Admin-панели (nginx → Traefik):"
-[[ -n "$SYNAPSE_ADMIN_PORT" ]] && echo "    Synapse Admin:  https://matrix.${DOMAIN}:${SYNAPSE_ADMIN_PORT}/"
+[[ -n "$KETESA_PORT" ]] && echo "    Ketesa:  https://matrix.${DOMAIN}:${KETESA_PORT}/"
 [[ -n "$ELEMENT_ADMIN_PORT" ]] && echo "    Element Admin:  https://matrix.${DOMAIN}:${ELEMENT_ADMIN_PORT}/"
 echo ""
     fi
@@ -1425,7 +1425,7 @@ echo ""
     fi
 else
 echo "  Admin-панели (Traefik):"
-echo "    Synapse Admin:  https://matrix.${DOMAIN}/synapse-admin (по умолчанию)"
+echo "    Ketesa:  https://matrix.${DOMAIN}/ketesa (по умолчанию)"
 echo "    Element Admin:  https://admin.element.${DOMAIN}/ (по умолчанию)"
 echo "    (настраивается через hostname/path_prefix в vars.yml)"
 echo ""
