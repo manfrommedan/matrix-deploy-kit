@@ -1,43 +1,174 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Terms of Service</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
+:root {
+  --bg: #0c0c0e;
+  --bg-card: rgba(255,255,255,.035);
+  --border: rgba(255,255,255,.07);
+  --text: #d1d1d8;
+  --text-dim: #55555e;
+  --text-heading: #f0f0f2;
+  --accent: #1ed760;
+  --accent-muted: rgba(30,215,96,.1);
+}
+@media(prefers-color-scheme:light){
+  :root {
+    --bg: #fafafb;
+    --bg-card: rgba(0,0,0,.02);
+    --border: rgba(0,0,0,.06);
+    --text: #4b4b56;
+    --text-dim: #9b9ba6;
+    --text-heading: #111113;
+    --accent: #15a648;
+    --accent-muted: rgba(21,166,72,.06);
+  }
+}
+
 *{margin:0;padding:0;box-sizing:border-box}
-body{background:#0a0a0f;color:#c0c0c0;font-family:'Courier New',monospace;padding:2rem;max-width:700px;margin:0 auto;line-height:1.7}
-h1{color:#00ff41;font-size:1.3rem;letter-spacing:.2rem;margin-bottom:2rem;text-transform:uppercase;border-bottom:1px solid rgba(0,255,65,.2);padding-bottom:1rem}
-h2{color:#00ff41;font-size:.9rem;margin:1.5rem 0 .5rem;letter-spacing:.1rem}
-p{font-size:.85rem;margin-bottom:.8rem;color:rgba(192,192,192,.8)}
-ul{margin:.5rem 0 1rem 1.5rem;font-size:.85rem}
-li{margin-bottom:.3rem;color:rgba(192,192,192,.7)}
-.footer{margin-top:3rem;padding-top:1rem;border-top:1px solid rgba(0,255,65,.1);font-size:.7rem;color:rgba(0,255,65,.3)}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Inter',system-ui,-apple-system,sans-serif;
+  line-height:1.7;
+  -webkit-font-smoothing:antialiased;
+}
+
+.wrapper{
+  max-width:620px;
+  margin:0 auto;
+  padding:4rem 2rem 3rem;
+  animation:fadeIn .5s ease-out;
+}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
+.back{
+  display:inline-flex;align-items:center;gap:6px;
+  color:var(--text-dim);
+  text-decoration:none;
+  font-size:.8rem;
+  font-weight:500;
+  margin-bottom:2.5rem;
+  transition:color .2s;
+}
+.back:hover{color:var(--accent)}
+.back svg{width:14px;height:14px}
+
+h1{
+  font-size:1.75rem;
+  font-weight:700;
+  color:var(--text-heading);
+  letter-spacing:-.03em;
+  margin-bottom:6px;
+}
+.updated{
+  font-size:.75rem;
+  color:var(--text-dim);
+  margin-bottom:3rem;
+}
+
+.section{
+  margin-bottom:12px;
+  padding:20px 24px;
+  background:var(--bg-card);
+  border:1px solid var(--border);
+  border-radius:16px;
+}
+.section h2{
+  font-size:.88rem;
+  font-weight:600;
+  color:var(--text-heading);
+  margin-bottom:10px;
+  display:flex;align-items:center;gap:10px;
+}
+.num{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:24px;height:24px;
+  background:var(--accent-muted);
+  color:var(--accent);
+  border-radius:8px;
+  font-size:.7rem;
+  font-weight:700;
+  flex-shrink:0;
+}
+.section p{
+  font-size:.84rem;
+  margin-bottom:6px;
+  line-height:1.7;
+}
+.section p:last-child{margin-bottom:0}
+.section ul{
+  margin:.5rem 0 0 1.2rem;
+  font-size:.84rem;
+}
+.section li{
+  margin-bottom:5px;
+  line-height:1.65;
+}
+
+.footer{
+  margin-top:3rem;
+  text-align:center;
+  font-size:.7rem;
+  color:var(--text-dim);
+  letter-spacing:.03em;
+}
+
+@media(max-width:480px){
+  .wrapper{padding:2.5rem 1.2rem 2rem}
+  h1{font-size:1.4rem}
+  .section{padding:16px 18px}
+}
 </style>
 </head>
 <body>
-<h1>Terms of Service</h1>
+<div class="wrapper">
+  <a class="back" href="/">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+    Back
+  </a>
 
-<h2>1. General</h2>
-<p>This is a private server. By registering an account, you agree to the following rules.</p>
+  <h1>Terms of Service</h1>
+  <div class="updated">Last updated: <!-- UPDATE_DATE --></div>
 
-<h2>2. Rules</h2>
-<ul>
-<li>Do not use this server for spam or automated mass messaging.</li>
-<li>Do not violate applicable laws.</li>
-<li>Do not share illegal content.</li>
-<li>Do not attempt to disrupt the server or its services.</li>
-</ul>
+  <div class="section">
+    <h2><span class="num">1</span> General</h2>
+    <p>This is a private Matrix homeserver. By registering an account you agree to the following terms.</p>
+  </div>
 
-<h2>3. Privacy</h2>
-<p>Messages in encrypted rooms are end-to-end encrypted and cannot be read by the server administrator. Unencrypted messages and metadata (room membership, timestamps) are stored on the server.</p>
+  <div class="section">
+    <h2><span class="num">2</span> Acceptable Use</h2>
+    <ul>
+      <li>Do not use this server for spam or automated mass messaging.</li>
+      <li>Do not violate applicable laws.</li>
+      <li>Do not share illegal content.</li>
+      <li>Do not attempt to disrupt the server or its services.</li>
+    </ul>
+  </div>
 
-<h2>4. Account Termination</h2>
-<p>The server administrator reserves the right to terminate any account at any time without prior notice for violation of these rules.</p>
+  <div class="section">
+    <h2><span class="num">3</span> Privacy</h2>
+    <p>Messages in encrypted rooms are end-to-end encrypted and cannot be read by the administrator.</p>
+    <p>Unencrypted messages and metadata (room membership, timestamps) are stored on the server.</p>
+  </div>
 
-<h2>5. No Warranty</h2>
-<p>This service is provided as-is with no guarantees of uptime or data preservation. Keep your own backups of important data.</p>
+  <div class="section">
+    <h2><span class="num">4</span> Termination</h2>
+    <p>The administrator may terminate any account at any time without notice for violation of these terms.</p>
+  </div>
 
-<div class="footer">Last updated: <!-- Обнови дату --></div>
+  <div class="section">
+    <h2><span class="num">5</span> No Warranty</h2>
+    <p>This service is provided as-is with no guarantees of uptime or data preservation. Keep backups of important data.</p>
+  </div>
+
+  <div class="footer">Powered by Matrix</div>
+</div>
 </body>
 </html>
