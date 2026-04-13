@@ -367,7 +367,7 @@ MATRIX_DOMAIN=""
 MATRIX_HOSTNAME=""
 
 # Admin-панели (заполняются detect_admin_endpoints)
-SYNAPSE_ADMIN_URL=""
+KETESA_URL=""
 ELEMENT_ADMIN_URL=""
 
 detect_domain() {
@@ -405,7 +405,7 @@ _vars_yml() {
 }
 
 detect_admin_endpoints() {
-    SYNAPSE_ADMIN_URL=""
+    KETESA_URL=""
     ELEMENT_ADMIN_URL=""
 
     [[ -z "$MATRIX_HOSTNAME" ]] && return 0
@@ -417,7 +417,7 @@ detect_admin_endpoints() {
             if [[ "$line" =~ listen[[:space:]]+([0-9]+)[[:space:]]+ssl ]]; then
                 current_port="${BASH_REMATCH[1]}"
             fi
-            if [[ "$line" =~ Host[[:space:]]+synapse-admin\.internal ]]; then
+            if [[ "$line" =~ Host[[:space:]]+(ketesa|synapse-admin)\.internal ]]; then
                 sa_port="$current_port"
             fi
             if [[ "$line" =~ Host[[:space:]]+element-admin\.internal ]]; then
@@ -425,18 +425,18 @@ detect_admin_endpoints() {
             fi
         done < "$NGINX_CONF"
 
-        [[ -n "$sa_port" ]] && SYNAPSE_ADMIN_URL="https://${MATRIX_HOSTNAME}:${sa_port}/"
+        [[ -n "$sa_port" ]] && KETESA_URL="https://${MATRIX_HOSTNAME}:${sa_port}/"
         [[ -n "$ea_port" ]] && ELEMENT_ADMIN_URL="https://${MATRIX_HOSTNAME}:${ea_port}/"
 
         # Если admin не на порту — проверяем path из vars.yml
-        if [[ -z "$SYNAPSE_ADMIN_URL" ]]; then
+        if [[ -z "$KETESA_URL" ]]; then
             local sa_enabled
-            sa_enabled=$(_vars_yml "matrix_synapse_admin_enabled")
+            sa_enabled=$(_vars_yml "matrix_ketesa_enabled")
             if [[ "$sa_enabled" == "true" ]]; then
                 local sa_path
-                sa_path=$(_vars_yml "matrix_synapse_admin_path_prefix")
-                sa_path="${sa_path:-/synapse-admin}"
-                SYNAPSE_ADMIN_URL="https://${MATRIX_HOSTNAME}${sa_path}"
+                sa_path=$(_vars_yml "matrix_ketesa_path_prefix")
+                sa_path="${sa_path:-/ketesa}"
+                KETESA_URL="https://${MATRIX_HOSTNAME}${sa_path}"
             fi
         fi
 
@@ -455,14 +455,14 @@ detect_admin_endpoints() {
     else
         # --- Traefik-only режим: URL из vars.yml ---
         local sa_enabled
-        sa_enabled=$(_vars_yml "matrix_synapse_admin_enabled")
+        sa_enabled=$(_vars_yml "matrix_ketesa_enabled")
         if [[ "$sa_enabled" == "true" ]]; then
             local sa_host sa_path
-            sa_host=$(_vars_yml "matrix_synapse_admin_hostname")
-            sa_path=$(_vars_yml "matrix_synapse_admin_path_prefix")
+            sa_host=$(_vars_yml "matrix_ketesa_hostname")
+            sa_path=$(_vars_yml "matrix_ketesa_path_prefix")
             sa_host="${sa_host:-${MATRIX_HOSTNAME}}"
-            sa_path="${sa_path:-/synapse-admin}"
-            SYNAPSE_ADMIN_URL="https://${sa_host}${sa_path}"
+            sa_path="${sa_path:-/ketesa}"
+            KETESA_URL="https://${sa_host}${sa_path}"
         fi
 
         local ea_enabled
@@ -488,7 +488,7 @@ reload_proxy() {
         step "Перезагрузка nginx"
 
         if [[ "$DRY_RUN" == true ]]; then
-            log "DRY-RUN: nginx reload"
+            log "DRY-RUN: nginx reload + traefik restart"
             return 0
         fi
 
@@ -500,21 +500,28 @@ reload_proxy() {
             nginx -t
             return 1
         fi
-        
-        step "Перезапуск Traefik"
 
-        if [[ "$DRY_RUN" == true ]]; then
-            log "DRY-RUN: docker restart matrix-traefik"
-            return 0
-        fi
-        if docker ps --format '{{.Names}}' | grep -q "^matrix-traefik$"; then
-            sleep 10
-            #docker restart matrix-traefik
-            systemctl restart matrix-traefik
-            log "Traefik перезапущен"
-        else
-            warn "Контейнер matrix-traefik не найден"
-        fi
+        step "Перезапуск сервисов (порядок: postgres → synapse → traefik)"
+
+        # Правильный порядок: БД → приложение → прокси
+        # Без этого traefik стартует раньше synapse и возвращает 502
+        for svc in matrix-postgres matrix-synapse matrix-traefik; do
+            if systemctl is-enabled "$svc" &>/dev/null; then
+                info "Перезапуск $svc..."
+                systemctl restart "$svc"
+                # Ждём пока сервис поднимется
+                local wait=0
+                while ! systemctl is-active --quiet "$svc" 2>/dev/null; do
+                    sleep 1
+                    ((wait++))
+                    if (( wait > 30 )); then
+                        warn "$svc не запустился за 30 секунд"
+                        break
+                    fi
+                done
+                log "$svc запущен"
+            fi
+        done
     fi
 }
 
@@ -635,13 +642,13 @@ health_check() {
             echo -e "    ${YELLOW}●${NC} .well-known       → ${http_code}"
         fi
 
-        # Synapse Admin
-        if [[ -n "$SYNAPSE_ADMIN_URL" ]]; then
-            http_code=$(curl -so /dev/null -w '%{http_code}' --max-time 5 "$SYNAPSE_ADMIN_URL" 2>/dev/null || true)
+        # Ketesa
+        if [[ -n "$KETESA_URL" ]]; then
+            http_code=$(curl -so /dev/null -w '%{http_code}' --max-time 5 "$KETESA_URL" 2>/dev/null || true)
             if [[ "$http_code" == "200" ]]; then
-                echo -e "    ${GREEN}●${NC} Synapse Admin     → 200"
+                echo -e "    ${GREEN}●${NC} Ketesa     → 200"
             else
-                echo -e "    ${RED}●${NC} Synapse Admin     → ${http_code}"
+                echo -e "    ${RED}●${NC} Ketesa     → ${http_code}"
                 all_ok=false
             fi
         fi
@@ -848,8 +855,8 @@ main() {
             echo -e "  ${BOLD}Сервисы:${NC}"
             echo -e "    Element Web:    https://element.${MATRIX_DOMAIN}/"
             echo -e "    Synapse API:    https://${MATRIX_HOSTNAME}/_matrix/client/versions"
-            [[ -n "$SYNAPSE_ADMIN_URL" ]] && \
-                echo -e "    Synapse Admin:  ${SYNAPSE_ADMIN_URL}"
+            [[ -n "$KETESA_URL" ]] && \
+                echo -e "    Ketesa:  ${KETESA_URL}"
             [[ -n "$ELEMENT_ADMIN_URL" ]] && \
                 echo -e "    Element Admin:  ${ELEMENT_ADMIN_URL}"
         fi
