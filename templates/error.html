@@ -1,170 +1,197 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Down the rabbit hole</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>503</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0c0c0e;
+  --text: #f0f0f2;
+  --text-dim: #55555e;
+  --text-mid: #8b8b96;
+  --accent: #1ed760;
+  --accent-muted: rgba(30,215,96,.1);
+  --border: rgba(255,255,255,.07);
+  --card: rgba(255,255,255,.035);
+}
+@media(prefers-color-scheme:light){
+  :root {
+    --bg: #fafafb;
+    --text: #111113;
+    --text-dim: #9b9ba6;
+    --text-mid: #6b6b76;
+    --accent: #15a648;
+    --accent-muted: rgba(21,166,72,.08);
+    --border: rgba(0,0,0,.07);
+    --card: rgba(0,0,0,.025);
+  }
+}
+[data-theme="light"] {
+  --bg: #fafafb;--text: #111113;--text-dim: #9b9ba6;--text-mid: #6b6b76;
+  --accent: #15a648;--accent-muted: rgba(21,166,72,.08);
+  --border: rgba(0,0,0,.07);--card: rgba(0,0,0,.025);
+}
+[data-theme="dark"] {
+  --bg: #0c0c0e;--text: #f0f0f2;--text-dim: #55555e;--text-mid: #8b8b96;
+  --accent: #1ed760;--accent-muted: rgba(30,215,96,.1);
+  --border: rgba(255,255,255,.07);--card: rgba(255,255,255,.035);
+}
 
-        body {
-            background: #0a0a0a;
-            color: #00ff41;
-            font-family: 'Courier New', monospace;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-            overflow: hidden;
-        }
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Inter',system-ui,-apple-system,sans-serif;
+  display:flex;align-items:center;justify-content:center;
+  -webkit-font-smoothing:antialiased;
+}
 
-        .matrix-rain {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 0;
-            opacity: 0.15;
-        }
+.container{
+  text-align:center;
+  padding:2rem;
+  animation:enter .6s cubic-bezier(.16,1,.3,1);
+}
+@keyframes enter{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
 
-        .container {
-            position: relative;
-            z-index: 1;
-            text-align: center;
-            padding: 2rem;
-        }
+.code{
+  font-size:6.5rem;
+  font-weight:700;
+  letter-spacing:-.06em;
+  line-height:1;
+  color:var(--text);
+  opacity:.12;
+}
 
-        .glitch {
-            font-size: 8rem;
-            font-weight: 900;
-            color: #00ff41;
-            text-shadow:
-                0 0 10px #00ff41,
-                0 0 40px #00ff4180,
-                0 0 80px #00ff4140;
-            animation: flicker 3s infinite;
-            letter-spacing: 0.3em;
-        }
+.icon{
+  margin:1.5rem 0;
+  display:flex;justify-content:center;
+}
+.icon-circle{
+  width:56px;height:56px;
+  border-radius:50%;
+  background:var(--card);
+  border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+}
+.icon-circle svg{width:24px;height:24px;color:var(--accent);opacity:.7}
 
-        .skull {
-            font-size: 4rem;
-            margin: 1.5rem 0;
-            filter: drop-shadow(0 0 15px #00ff41);
-            animation: pulse 2s ease-in-out infinite;
-        }
+.message{
+  font-size:1.05rem;
+  font-weight:600;
+  letter-spacing:-.01em;
+  margin-bottom:6px;
+}
+.detail{
+  font-size:.84rem;
+  color:var(--text-mid);
+  max-width:280px;
+  margin:0 auto;
+  line-height:1.65;
+}
 
-        .message {
-            font-size: 1.1rem;
-            color: #00ff41;
-            opacity: 0;
-            animation: typewriter 2s steps(40) 0.5s forwards;
-            white-space: nowrap;
-            overflow: hidden;
-            border-right: 2px solid #00ff41;
-            display: inline-block;
-            max-width: 100%;
-        }
+.retry-btn{
+  display:inline-flex;align-items:center;gap:8px;
+  margin-top:2rem;
+  padding:10px 24px;
+  background:var(--accent-muted);
+  border:1px solid var(--accent);
+  border-radius:100px;
+  color:var(--accent);
+  font-family:inherit;
+  font-size:.82rem;
+  font-weight:600;
+  cursor:pointer;
+  transition:all .25s ease;
+  letter-spacing:.01em;
+}
+.retry-btn:hover{
+  background:var(--accent);
+  color:var(--bg);
+  transform:translateY(-2px);
+  box-shadow:0 8px 24px var(--accent-muted);
+}
+.retry-btn svg{width:14px;height:14px}
 
-        .submessage {
-            font-size: 0.85rem;
-            color: #00ff4180;
-            margin-top: 2rem;
-            opacity: 0;
-            animation: fadein 1s 3s forwards;
-        }
+.timer{
+  margin-top:1.2rem;
+  font-size:.72rem;
+  color:var(--text-dim);
+  font-variant-numeric:tabular-nums;
+}
 
-        .prompt {
-            margin-top: 3rem;
-            font-size: 0.8rem;
-            color: #00ff4150;
-            opacity: 0;
-            animation: fadein 1s 4s forwards;
-        }
+.theme-btn{
+  position:fixed;top:24px;right:24px;z-index:10;
+  width:42px;height:42px;
+  background:var(--card);border:1px solid var(--border);border-radius:12px;
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:all .25s ease;color:var(--text-dim);
+}
+.theme-btn:hover{border-color:var(--text-dim);color:var(--text)}
+.theme-btn svg{width:16px;height:16px;transition:transform .3s ease}
+.theme-btn:hover svg{transform:rotate(30deg)}
 
-        .prompt span {
-            animation: blink 1s step-end infinite;
-        }
-
-        @keyframes flicker {
-            0%, 95%, 100% { opacity: 1; }
-            96% { opacity: 0.8; transform: translateX(-2px); }
-            97% { opacity: 1; transform: translateX(2px); }
-            98% { opacity: 0.6; transform: translateX(-1px); }
-        }
-
-        @keyframes pulse {
-            0%, 100% { transform: scale(1); opacity: 0.9; }
-            50% { transform: scale(1.05); opacity: 1; }
-        }
-
-        @keyframes typewriter {
-            from { width: 0; opacity: 1; }
-            to { width: 100%; opacity: 1; }
-        }
-
-        @keyframes fadein {
-            to { opacity: 1; }
-        }
-
-        @keyframes blink {
-            50% { opacity: 0; }
-        }
-
-        @media (max-width: 600px) {
-            .glitch { font-size: 5rem; }
-            .skull { font-size: 3rem; }
-            .message { font-size: 0.9rem; }
-        }
-    </style>
+@media(max-width:480px){.code{font-size:5rem}.theme-btn{top:16px;right:16px;width:38px;height:38px}}
+</style>
 </head>
 <body>
-    <canvas class="matrix-rain" id="rain"></canvas>
+<button class="theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">
+  <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+  <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="display:none"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+</button>
+<div class="container">
+  <div class="code">502</div>
 
-    <div class="container">
-        <div class="glitch">502</div>
-        <div class="skull">&#9760;</div>
-        <div class="message">The machine sleeps. It will rise again.</div>
-        <div class="submessage">// connection to upstream failed</div>
-        <div class="prompt">root@void:~$ attempting reconnect...<span>_</span></div>
+  <div class="icon">
+    <div class="icon-circle">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/>
+        <line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
     </div>
+  </div>
 
-    <script>
-        const canvas = document.getElementById('rain');
-        const ctx = canvas.getContext('2d');
+  <div class="message">Temporarily unavailable</div>
+  <div class="detail">The server is updating or restarting. This usually resolves within a few minutes.</div>
 
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+  <button class="retry-btn" onclick="location.reload()">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+    Retry
+  </button>
 
-        const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789';
-        const fontSize = 14;
-        const columns = Math.floor(canvas.width / fontSize);
-        const drops = Array(columns).fill(1);
+  <div class="timer">Auto-retry in <span id="countdown">30</span>s</div>
+</div>
 
-        function draw() {
-            ctx.fillStyle = 'rgba(10, 10, 10, 0.05)';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+<script>
+let t=30;
+const el=document.getElementById('countdown');
+setInterval(()=>{if(--t<=0)location.reload();el.textContent=t},1000);
 
-            ctx.fillStyle = '#00ff41';
-            ctx.font = fontSize + 'px monospace';
-
-            for (let i = 0; i < drops.length; i++) {
-                const char = chars[Math.floor(Math.random() * chars.length)];
-                ctx.fillText(char, i * fontSize, drops[i] * fontSize);
-
-                if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) {
-                    drops[i] = 0;
-                }
-                drops[i]++;
-            }
-        }
-
-        setInterval(draw, 50);
-
-        window.addEventListener('resize', () => {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-        });
-    </script>
+(function(){
+  const html=document.documentElement;
+  const saved=localStorage.getItem('theme');
+  if(saved)html.setAttribute('data-theme',saved);
+  updateIcons();
+  window.toggleTheme=function(){
+    const current=html.getAttribute('data-theme');
+    const isDark=!current?!matchMedia('(prefers-color-scheme:light)').matches:current==='dark';
+    const next=isDark?'light':'dark';
+    html.setAttribute('data-theme',next);
+    localStorage.setItem('theme',next);
+    updateIcons();
+  };
+  function updateIcons(){
+    const theme=html.getAttribute('data-theme')||(matchMedia('(prefers-color-scheme:light)').matches?'light':'dark');
+    document.querySelector('.sun-icon').style.display=theme==='dark'?'block':'none';
+    document.querySelector('.moon-icon').style.display=theme==='light'?'block':'none';
+  }
+})();
+</script>
 </body>
 </html>
