@@ -89,7 +89,7 @@ bash /root/matrix-deploy-kit/deploy.sh
 ```bash
 bash tools/prepare_server.sh \
   --domain example.com \
-  --ketesa-port 35805 \
+  --synapse-admin-port 35805 \
   --element-admin-port 35122 \
   --with-ntfy \
   --with-landing-page
