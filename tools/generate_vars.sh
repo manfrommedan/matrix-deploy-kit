@@ -1991,6 +1991,10 @@ matrix_synapse_tls_federation_listener_enabled: false
 # Все federation-роутеры (включая media-repo) через entrypoint ${FED_ENTRYPOINT}
 # (entrypoint matrix-federation не существует при federation на 443)
 matrix_federation_traefik_entrypoint_name: ${FED_ENTRYPOINT}
+
+# Fix: client API и federation имеют одинаковый rule на одном entrypoint —
+# без приоритета federation побеждает и клиентские запросы идут на порт 8048 (502)
+matrix_synapse_reverse_proxy_companion_container_labels_public_client_api_traefik_priority: 1000
 VARSEOF
 fi
 
