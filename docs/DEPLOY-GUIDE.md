@@ -7,7 +7,7 @@
 - **Element Web** — веб-клиент (как Telegram Web, только свой)
 - **Аудио/видео звонки** — через LiveKit (WebRTC)
 - **Push-уведомления** — через ntfy (без Google)
-- **Admin-панели** — Synapse Admin + Element Admin
+- **Admin-панели** — Ketesa + Element Admin
 - **Мосты** — Telegram, WhatsApp, Signal, Discord и другие
 - **Боты** — модерация, вебхуки, поддержка
 
@@ -116,7 +116,7 @@ bash /root/matrix-deploy-kit/deploy.sh
 
 ```bash
 bash tools/prepare_server.sh --domain example.com \
-  --synapse-admin-port 35805 \
+  --ketesa-port 35805 \
   --element-admin-port 35122 \
   --with-landing-page \
   --with-ntfy
@@ -135,7 +135,7 @@ bash tools/prepare_server.sh --domain example.com \
 | Флаг | Что делает |
 |------|-----------|
 | `--domain DOMAIN` | **(обязательно)** Домен сервера |
-| `--synapse-admin-port PORT` | Synapse Admin на скрытом порту |
+| `--ketesa-port PORT` | Ketesa на скрытом порту |
 | `--element-admin-port PORT` | Element Admin на скрытом порту |
 | `--with-landing-page` | Landing page на matrix.DOMAIN |
 | `--with-ntfy` | Поддомен ntfy.DOMAIN |
@@ -207,7 +207,7 @@ docker exec matrix-synapse \
 
 Открой в браузере:
 - `https://element.example.com` — веб-клиент (войди как admin)
-- `https://matrix.example.com:35805` — Synapse Admin (если настроил)
+- `https://matrix.example.com:35805` — Ketesa (если настроил)
 - `https://matrix.example.com:35122` — Element Admin (если настроил)
 
 Проверка федерации:
