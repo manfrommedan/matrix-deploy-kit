@@ -321,7 +321,7 @@ apply_update() {
     cd "$PLAYBOOK_ROOT"
 
     info "Это обновит Docker-образы и перезапустит изменённые сервисы"
-    info "Команда: ansible-playbook setup.yml --tags=install-all,ensure-matrix-users-created,start"
+    info "Команда: ansible-playbook setup.yml --tags=setup-all,ensure-matrix-users-created,start"
     echo ""
 
     if [[ "$DRY_RUN" == true ]]; then
@@ -351,7 +351,7 @@ apply_update() {
     ansible-playbook \
         -i "${PLAYBOOK_ROOT}/inventory/hosts" \
         "${PLAYBOOK_ROOT}/setup.yml" \
-        --tags=install-all,ensure-matrix-users-created,start
+        --tags=setup-all,ensure-matrix-users-created,start
 
     log "Обновления применены"
 }
@@ -417,7 +417,8 @@ detect_admin_endpoints() {
             if [[ "$line" =~ listen[[:space:]]+([0-9]+)[[:space:]]+ssl ]]; then
                 current_port="${BASH_REMATCH[1]}"
             fi
-            if [[ "$line" =~ Host[[:space:]]+synapse-admin\.internal ]]; then
+            # Ketesa (новый) или synapse-admin (legacy)
+            if [[ "$line" =~ Host[[:space:]]+(ketesa|synapse-admin)\.internal ]]; then
                 sa_port="$current_port"
             fi
             if [[ "$line" =~ Host[[:space:]]+element-admin\.internal ]]; then
@@ -429,14 +430,23 @@ detect_admin_endpoints() {
         [[ -n "$ea_port" ]] && ELEMENT_ADMIN_URL="https://${MATRIX_HOSTNAME}:${ea_port}/"
 
         # Если admin не на порту — проверяем path из vars.yml
+        # Ketesa (новый, приоритет) → synapse-admin (legacy fallback)
         if [[ -z "$SYNAPSE_ADMIN_URL" ]]; then
             local sa_enabled
-            sa_enabled=$(_vars_yml "matrix_synapse_admin_enabled")
+            sa_enabled=$(_vars_yml "matrix_ketesa_enabled")
             if [[ "$sa_enabled" == "true" ]]; then
                 local sa_path
-                sa_path=$(_vars_yml "matrix_synapse_admin_path_prefix")
-                sa_path="${sa_path:-/synapse-admin}"
+                sa_path=$(_vars_yml "matrix_ketesa_path_prefix")
+                sa_path="${sa_path:-/}"
                 SYNAPSE_ADMIN_URL="https://${MATRIX_HOSTNAME}${sa_path}"
+            else
+                sa_enabled=$(_vars_yml "matrix_synapse_admin_enabled")
+                if [[ "$sa_enabled" == "true" ]]; then
+                    local sa_path
+                    sa_path=$(_vars_yml "matrix_synapse_admin_path_prefix")
+                    sa_path="${sa_path:-/synapse-admin}"
+                    SYNAPSE_ADMIN_URL="https://${MATRIX_HOSTNAME}${sa_path}"
+                fi
             fi
         fi
 
@@ -454,15 +464,26 @@ detect_admin_endpoints() {
         fi
     else
         # --- Traefik-only режим: URL из vars.yml ---
+        # Ketesa (новый) → synapse-admin (legacy)
         local sa_enabled
-        sa_enabled=$(_vars_yml "matrix_synapse_admin_enabled")
+        sa_enabled=$(_vars_yml "matrix_ketesa_enabled")
         if [[ "$sa_enabled" == "true" ]]; then
             local sa_host sa_path
-            sa_host=$(_vars_yml "matrix_synapse_admin_hostname")
-            sa_path=$(_vars_yml "matrix_synapse_admin_path_prefix")
+            sa_host=$(_vars_yml "matrix_ketesa_hostname")
+            sa_path=$(_vars_yml "matrix_ketesa_path_prefix")
             sa_host="${sa_host:-${MATRIX_HOSTNAME}}"
-            sa_path="${sa_path:-/synapse-admin}"
+            sa_path="${sa_path:-/}"
             SYNAPSE_ADMIN_URL="https://${sa_host}${sa_path}"
+        else
+            sa_enabled=$(_vars_yml "matrix_synapse_admin_enabled")
+            if [[ "$sa_enabled" == "true" ]]; then
+                local sa_host sa_path
+                sa_host=$(_vars_yml "matrix_synapse_admin_hostname")
+                sa_path=$(_vars_yml "matrix_synapse_admin_path_prefix")
+                sa_host="${sa_host:-${MATRIX_HOSTNAME}}"
+                sa_path="${sa_path:-/synapse-admin}"
+                SYNAPSE_ADMIN_URL="https://${sa_host}${sa_path}"
+            fi
         fi
 
         local ea_enabled
@@ -644,13 +665,13 @@ health_check() {
             echo -e "    ${YELLOW}●${NC} .well-known       → ${http_code}"
         fi
 
-        # Synapse Admin
+        # Admin Panel
         if [[ -n "$SYNAPSE_ADMIN_URL" ]]; then
             http_code=$(curl -so /dev/null -w '%{http_code}' --max-time 5 "$SYNAPSE_ADMIN_URL" 2>/dev/null || true)
             if [[ "$http_code" == "200" ]]; then
-                echo -e "    ${GREEN}●${NC} Synapse Admin     → 200"
+                echo -e "    ${GREEN}●${NC} Admin Panel     → 200"
             else
-                echo -e "    ${RED}●${NC} Synapse Admin     → ${http_code}"
+                echo -e "    ${RED}●${NC} Admin Panel     → ${http_code}"
                 all_ok=false
             fi
         fi
@@ -958,7 +979,7 @@ main() {
             echo -e "    Element Web:    https://element.${MATRIX_DOMAIN}/"
             echo -e "    Synapse API:    https://${MATRIX_HOSTNAME}/_matrix/client/versions"
             [[ -n "$SYNAPSE_ADMIN_URL" ]] && \
-                echo -e "    Synapse Admin:  ${SYNAPSE_ADMIN_URL}"
+                echo -e "    Admin Panel:  ${SYNAPSE_ADMIN_URL}"
             [[ -n "$ELEMENT_ADMIN_URL" ]] && \
                 echo -e "    Element Admin:  ${ELEMENT_ADMIN_URL}"
         fi
