@@ -24,7 +24,7 @@ NC='\033[0m'
 
 # --- Вывод ---
 log()     { echo -e "${GREEN}[+]${NC} $*"; }
-warn()    { echo -e "${YELLOW}[!]${NC} $*" >&2; }
+warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
 err()     { echo -e "${RED}[x]${NC} $*" >&2; }
 info()    { echo -e "${BLUE}[i]${NC} $*"; }
 step()    { echo ""; echo -e "${BOLD}${CYAN}--- $* ---${NC}"; echo ""; }
@@ -38,7 +38,7 @@ DRY_RUN=false
 SKIP_BACKUP=false
 BACKUP_ONLY=false
 FORCE=false
-RELOAD_NGINX=false
+RELOAD_NGINX=true
 SYNC_CERTS_ONLY=false
 BACKUP_DIR=""
 MATRIX_DATA_PATH="/matrix"
@@ -312,87 +312,6 @@ update_roles() {
 
 
 # =============================================================================
-# Автопатчинг vars.yml (совместимость с новыми версиями плейбука)
-# =============================================================================
-
-patch_vars() {
-    step "Проверка vars.yml на совместимость"
-
-    [[ -z "$MATRIX_HOSTNAME" ]] && detect_domain
-    local vars_file="${PLAYBOOK_ROOT}/inventory/host_vars/${MATRIX_HOSTNAME}/vars.yml"
-
-    if [[ ! -f "$vars_file" ]]; then
-        warn "vars.yml не найден — пропуск"
-        return 0
-    fi
-
-    local patched=false
-
-    # --- Rename: matrix_synapse_admin_* → matrix_ketesa_* ---
-    if grep -q "^matrix_synapse_admin_" "$vars_file" 2>/dev/null; then
-        info "Переименование matrix_synapse_admin_* → matrix_ketesa_*"
-        if [[ "$DRY_RUN" != true ]]; then
-            sed -i 's/^matrix_synapse_admin_/matrix_ketesa_/' "$vars_file"
-            # hostname: synapse-admin.internal → ketesa.internal
-            sed -i 's/synapse-admin\.internal/ketesa.internal/' "$vars_file"
-            patched=true
-        else
-            log "DRY-RUN: sed matrix_synapse_admin_ → matrix_ketesa_"
-        fi
-    fi
-
-    # --- Rename: matrix_coturn_* → coturn_* ---
-    if grep -q "^matrix_coturn_" "$vars_file" 2>/dev/null; then
-        info "Переименование matrix_coturn_* → coturn_*"
-        if [[ "$DRY_RUN" != true ]]; then
-            sed -i 's/^matrix_coturn_/coturn_/' "$vars_file"
-            patched=true
-        else
-            log "DRY-RUN: sed matrix_coturn_ → coturn_"
-        fi
-    fi
-
-    # --- Fix: client API priority при federation на web entrypoint ---
-    if grep -q "matrix_federation_traefik_entrypoint_name:.*web" "$vars_file" 2>/dev/null; then
-        if ! grep -q "public_client_api_traefik_priority" "$vars_file" 2>/dev/null; then
-            info "Добавление приоритета client API (federation на web entrypoint)"
-            if [[ "$DRY_RUN" != true ]]; then
-                cat >> "$vars_file" <<'PATCHEOF'
-
-# Fix: client API и federation на одном entrypoint — без приоритета 502
-matrix_synapse_reverse_proxy_companion_container_labels_public_client_api_traefik_priority: 1000
-PATCHEOF
-                patched=true
-            else
-                log "DRY-RUN: добавление client_api_traefik_priority"
-            fi
-        fi
-    fi
-
-    # --- Migration auto-accept ---
-    if ! grep -q "matrix_playbook_migration_validated_version" "$vars_file" 2>/dev/null; then
-        info "Добавление авто-принятия миграций"
-        if [[ "$DRY_RUN" != true ]]; then
-            cat >> "$vars_file" <<'PATCHEOF'
-
-# Авто-принятие миграций (breaking changes)
-matrix_playbook_migration_validated_version: "{{ matrix_playbook_migration_expected_version }}"
-PATCHEOF
-            patched=true
-        else
-            log "DRY-RUN: добавление migration_validated_version"
-        fi
-    fi
-
-    if [[ "$patched" == true ]]; then
-        log "vars.yml пропатчен"
-    else
-        log "vars.yml актуален, патчи не нужны"
-    fi
-}
-
-
-# =============================================================================
 # Применение обновлений
 # =============================================================================
 
@@ -435,12 +354,6 @@ apply_update() {
         --tags=install-all,ensure-matrix-users-created,start
 
     log "Обновления применены"
-
-    # Гарантируем запуск всех сервисов (ansible может не стартовать всё)
-    info "Запуск всех сервисов..."
-    if command -v just &>/dev/null && [[ -f "${PLAYBOOK_ROOT}/justfile" ]]; then
-        just start-all 2>/dev/null || true
-    fi
 }
 
 
@@ -454,7 +367,7 @@ MATRIX_DOMAIN=""
 MATRIX_HOSTNAME=""
 
 # Admin-панели (заполняются detect_admin_endpoints)
-KETESA_URL=""
+SYNAPSE_ADMIN_URL=""
 ELEMENT_ADMIN_URL=""
 
 detect_domain() {
@@ -492,7 +405,7 @@ _vars_yml() {
 }
 
 detect_admin_endpoints() {
-    KETESA_URL=""
+    SYNAPSE_ADMIN_URL=""
     ELEMENT_ADMIN_URL=""
 
     [[ -z "$MATRIX_HOSTNAME" ]] && return 0
@@ -504,7 +417,7 @@ detect_admin_endpoints() {
             if [[ "$line" =~ listen[[:space:]]+([0-9]+)[[:space:]]+ssl ]]; then
                 current_port="${BASH_REMATCH[1]}"
             fi
-            if [[ "$line" =~ Host[[:space:]]+(ketesa|synapse-admin)\.internal ]]; then
+            if [[ "$line" =~ Host[[:space:]]+synapse-admin\.internal ]]; then
                 sa_port="$current_port"
             fi
             if [[ "$line" =~ Host[[:space:]]+element-admin\.internal ]]; then
@@ -512,18 +425,18 @@ detect_admin_endpoints() {
             fi
         done < "$NGINX_CONF"
 
-        [[ -n "$sa_port" ]] && KETESA_URL="https://${MATRIX_HOSTNAME}:${sa_port}/"
+        [[ -n "$sa_port" ]] && SYNAPSE_ADMIN_URL="https://${MATRIX_HOSTNAME}:${sa_port}/"
         [[ -n "$ea_port" ]] && ELEMENT_ADMIN_URL="https://${MATRIX_HOSTNAME}:${ea_port}/"
 
         # Если admin не на порту — проверяем path из vars.yml
-        if [[ -z "$KETESA_URL" ]]; then
+        if [[ -z "$SYNAPSE_ADMIN_URL" ]]; then
             local sa_enabled
-            sa_enabled=$(_vars_yml "matrix_ketesa_enabled")
+            sa_enabled=$(_vars_yml "matrix_synapse_admin_enabled")
             if [[ "$sa_enabled" == "true" ]]; then
                 local sa_path
-                sa_path=$(_vars_yml "matrix_ketesa_path_prefix")
-                sa_path="${sa_path:-/ketesa}"
-                KETESA_URL="https://${MATRIX_HOSTNAME}${sa_path}"
+                sa_path=$(_vars_yml "matrix_synapse_admin_path_prefix")
+                sa_path="${sa_path:-/synapse-admin}"
+                SYNAPSE_ADMIN_URL="https://${MATRIX_HOSTNAME}${sa_path}"
             fi
         fi
 
@@ -542,14 +455,14 @@ detect_admin_endpoints() {
     else
         # --- Traefik-only режим: URL из vars.yml ---
         local sa_enabled
-        sa_enabled=$(_vars_yml "matrix_ketesa_enabled")
+        sa_enabled=$(_vars_yml "matrix_synapse_admin_enabled")
         if [[ "$sa_enabled" == "true" ]]; then
             local sa_host sa_path
-            sa_host=$(_vars_yml "matrix_ketesa_hostname")
-            sa_path=$(_vars_yml "matrix_ketesa_path_prefix")
+            sa_host=$(_vars_yml "matrix_synapse_admin_hostname")
+            sa_path=$(_vars_yml "matrix_synapse_admin_path_prefix")
             sa_host="${sa_host:-${MATRIX_HOSTNAME}}"
-            sa_path="${sa_path:-/ketesa}"
-            KETESA_URL="https://${sa_host}${sa_path}"
+            sa_path="${sa_path:-/synapse-admin}"
+            SYNAPSE_ADMIN_URL="https://${sa_host}${sa_path}"
         fi
 
         local ea_enabled
@@ -575,14 +488,8 @@ reload_proxy() {
         step "Перезагрузка nginx"
 
         if [[ "$DRY_RUN" == true ]]; then
-            log "DRY-RUN: nginx reload + traefik restart"
+            log "DRY-RUN: nginx reload"
             return 0
-        fi
-
-        # Патч nginx: synapse-admin.internal → ketesa.internal
-        if grep -q 'synapse-admin\.internal' "$NGINX_CONF" 2>/dev/null; then
-            info "Переименование synapse-admin.internal → ketesa.internal в nginx"
-            sed -i 's/synapse-admin\.internal/ketesa.internal/' "$NGINX_CONF"
         fi
 
         if nginx -t 2>/dev/null; then
@@ -593,28 +500,20 @@ reload_proxy() {
             nginx -t
             return 1
         fi
+    else
+        step "Перезапуск Traefik"
 
-        step "Перезапуск сервисов (порядок: postgres → synapse → traefik)"
+        if [[ "$DRY_RUN" == true ]]; then
+            log "DRY-RUN: docker restart matrix-traefik"
+            return 0
+        fi
 
-        # Правильный порядок: БД → приложение → прокси
-        # Без этого traefik стартует раньше synapse и возвращает 502
-        for svc in matrix-postgres matrix-synapse matrix-traefik; do
-            if systemctl is-enabled "$svc" &>/dev/null; then
-                info "Перезапуск $svc..."
-                systemctl restart "$svc"
-                # Ждём пока сервис поднимется
-                local wait=0
-                while ! systemctl is-active --quiet "$svc" 2>/dev/null; do
-                    sleep 1
-                    ((wait++))
-                    if (( wait > 30 )); then
-                        warn "$svc не запустился за 30 секунд"
-                        break
-                    fi
-                done
-                log "$svc запущен"
-            fi
-        done
+        if docker ps --format '{{.Names}}' | grep -q "^matrix-traefik$"; then
+            docker restart matrix-traefik
+            log "Traefik перезапущен"
+        else
+            warn "Контейнер matrix-traefik не найден"
+        fi
     fi
 }
 
@@ -713,17 +612,27 @@ health_check() {
             all_ok=false
         fi
 
-        # Federation (порт 443 если federation_public_port=443, иначе 8448)
+        # Federation (порт 8448 или 443 если federation-on-443)
         local fed_port="8448"
-        local fed_public_port
-        fed_public_port=$(_vars_yml "matrix_federation_public_port")
-        [[ "$fed_public_port" == "443" ]] && fed_port="443"
+        local fed_entrypoint
+        fed_entrypoint=$(_vars_yml "matrix_federation_traefik_entrypoint_name")
+        [[ "$fed_entrypoint" == "web" ]] && fed_port="443"
         local fed_url="https://${MATRIX_HOSTNAME}:${fed_port}/_matrix/federation/v1/version"
         http_code=$(curl -so /dev/null -w '%{http_code}' --max-time 5 "$fed_url" 2>/dev/null || true)
         if [[ "$http_code" == "200" ]]; then
-            echo -e "    ${GREEN}●${NC} Federation API    → 200"
+            echo -e "    ${GREEN}●${NC} Federation API    → 200 (:${fed_port})"
         else
-            echo -e "    ${YELLOW}●${NC} Federation API    → ${http_code}"
+            echo -e "    ${YELLOW}●${NC} Federation API    → ${http_code} (:${fed_port})"
+        fi
+
+        # Media API (authenticated media → 401 = OK, 404 = media-repo не получает запросы)
+        local media_url="https://${MATRIX_HOSTNAME}/_matrix/media/v3/config"
+        http_code=$(curl -so /dev/null -w '%{http_code}' --max-time 5 "$media_url" 2>/dev/null || true)
+        if [[ "$http_code" == "401" || "$http_code" == "200" ]]; then
+            echo -e "    ${GREEN}●${NC} Media API         → ${http_code}"
+        else
+            echo -e "    ${RED}●${NC} Media API         → ${http_code} (ожидался 401 или 200)"
+            all_ok=false
         fi
 
         # .well-known
@@ -735,13 +644,13 @@ health_check() {
             echo -e "    ${YELLOW}●${NC} .well-known       → ${http_code}"
         fi
 
-        # Ketesa
-        if [[ -n "$KETESA_URL" ]]; then
-            http_code=$(curl -so /dev/null -w '%{http_code}' --max-time 5 "$KETESA_URL" 2>/dev/null || true)
+        # Synapse Admin
+        if [[ -n "$SYNAPSE_ADMIN_URL" ]]; then
+            http_code=$(curl -so /dev/null -w '%{http_code}' --max-time 5 "$SYNAPSE_ADMIN_URL" 2>/dev/null || true)
             if [[ "$http_code" == "200" ]]; then
-                echo -e "    ${GREEN}●${NC} Ketesa     → 200"
+                echo -e "    ${GREEN}●${NC} Synapse Admin     → 200"
             else
-                echo -e "    ${RED}●${NC} Ketesa     → ${http_code}"
+                echo -e "    ${RED}●${NC} Synapse Admin     → ${http_code}"
                 all_ok=false
             fi
         fi
@@ -843,6 +752,101 @@ sync_tls_certs() {
 
 
 # =============================================================================
+# Проверка vars.yml на конфликты приоритетов traefik
+# =============================================================================
+# При federation-on-443 + nginx companion получает explicit priority,
+# который перебивает media-repo роутеры → media ломается (404).
+# Эта проверка ловит проблему ДО apply и патчит vars.yml автоматически.
+
+check_vars_sanity() {
+    [[ -z "$MATRIX_HOSTNAME" ]] && return 0
+
+    local vars_file="${PLAYBOOK_ROOT}/inventory/host_vars/${MATRIX_HOSTNAME}/vars.yml"
+    [[ ! -f "$vars_file" ]] && return 0
+
+    step "Проверка vars.yml на конфликты"
+
+    local issues=0
+
+    # --- 1. Federation на web entrypoint без companion priority ---
+    local fed_entrypoint
+    fed_entrypoint=$(_vars_yml "matrix_federation_traefik_entrypoint_name")
+    if [[ "$fed_entrypoint" == "web" ]]; then
+        local companion_priority
+        companion_priority=$(_vars_yml "matrix_synapse_reverse_proxy_companion_container_labels_public_client_api_traefik_priority")
+        companion_priority="${companion_priority:-0}"
+
+        if (( companion_priority == 0 )); then
+            warn "Federation на entrypoint web, но companion priority не задан"
+            warn "Traefik не сможет разрешить конфликт маршрутов"
+            info "Добавляю: companion priority = 1000"
+            if [[ "$DRY_RUN" != true ]]; then
+                cat >> "$vars_file" <<'PATCHEOF'
+
+# [auto-patch] Companion priority: federation и client API на одном entrypoint
+matrix_synapse_reverse_proxy_companion_container_labels_public_client_api_traefik_priority: 1000
+PATCHEOF
+                companion_priority=1000
+            fi
+            ((issues++))
+        fi
+
+        # --- 2. Companion priority > 0, media-repo включён, но media-repo priority не задан ---
+        if (( companion_priority > 0 )); then
+            local media_enabled
+            media_enabled=$(_vars_yml "matrix_media_repo_enabled")
+
+            if [[ "$media_enabled" == "true" ]]; then
+                local media_priority
+                media_priority=$(_vars_yml "matrix_media_repo_container_labels_traefik_media_priority")
+                media_priority="${media_priority:-0}"
+
+                if (( media_priority == 0 )); then
+                    warn "Companion priority=${companion_priority}, но media-repo priority не задан"
+                    warn "Запросы /_matrix/media будут уходить в Synapse (где media_repo отключён) → 404"
+                    local target_priority=$(( companion_priority + 1000 ))
+                    info "Добавляю: media-repo priority = ${target_priority}"
+                    if [[ "$DRY_RUN" != true ]]; then
+                        cat >> "$vars_file" <<PATCHEOF
+
+# [auto-patch] Media-repo приоритеты (выше companion ${companion_priority}, иначе media 404)
+matrix_media_repo_container_labels_traefik_media_priority: ${target_priority}
+matrix_media_repo_container_labels_traefik_client_matrix_client_media_priority: ${target_priority}
+matrix_media_repo_container_labels_traefik_media_federation_priority: ${target_priority}
+matrix_media_repo_container_labels_traefik_federation_matrix_federation_media_priority: ${target_priority}
+matrix_media_repo_container_labels_traefik_logout_priority: ${target_priority}
+matrix_media_repo_container_labels_traefik_admin_priority: ${target_priority}
+matrix_media_repo_container_labels_traefik_t2bot_priority: ${target_priority}
+matrix_media_repo_container_labels_traefik_logout_federation_priority: ${target_priority}
+matrix_media_repo_container_labels_traefik_admin_federation_priority: ${target_priority}
+matrix_media_repo_container_labels_traefik_t2bot_federation_priority: ${target_priority}
+PATCHEOF
+                    fi
+                    ((issues++))
+
+                elif (( media_priority <= companion_priority )); then
+                    warn "media-repo priority (${media_priority}) <= companion priority (${companion_priority})"
+                    warn "Media запросы будут перехвачены companion → 404"
+                    local target_priority=$(( companion_priority + 1000 ))
+                    info "Исправляю: media-repo priority → ${target_priority}"
+                    if [[ "$DRY_RUN" != true ]]; then
+                        sed -i "s/\(matrix_media_repo_container_labels_traefik_.*_priority:\).*/\1 ${target_priority}/" "$vars_file"
+                    fi
+                    ((issues++))
+                fi
+            fi
+        fi
+    fi
+
+    if (( issues == 0 )); then
+        log "Конфликтов не обнаружено"
+    else
+        log "Исправлено проблем: ${issues}"
+    fi
+}
+
+
+# =============================================================================
 # Главная логика
 # =============================================================================
 
@@ -912,8 +916,9 @@ main() {
     update_playbook
     update_roles
 
-    # --- Патчинг vars.yml ---
-    patch_vars
+    # --- Проверка vars.yml на конфликты ---
+    detect_domain
+    check_vars_sanity
 
     apply_update
 
@@ -952,8 +957,8 @@ main() {
             echo -e "  ${BOLD}Сервисы:${NC}"
             echo -e "    Element Web:    https://element.${MATRIX_DOMAIN}/"
             echo -e "    Synapse API:    https://${MATRIX_HOSTNAME}/_matrix/client/versions"
-            [[ -n "$KETESA_URL" ]] && \
-                echo -e "    Ketesa:  ${KETESA_URL}"
+            [[ -n "$SYNAPSE_ADMIN_URL" ]] && \
+                echo -e "    Synapse Admin:  ${SYNAPSE_ADMIN_URL}"
             [[ -n "$ELEMENT_ADMIN_URL" ]] && \
                 echo -e "    Element Admin:  ${ELEMENT_ADMIN_URL}"
         fi
