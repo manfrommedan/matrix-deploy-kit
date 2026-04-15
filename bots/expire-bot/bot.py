@@ -147,13 +147,18 @@ def format_duration(seconds: int) -> str:
 
 # ─── Help text ────────────────────────────────────────────────────────────────
 
-HELP_TEMPLATE = """**Expire Bot** — auto-delete old messages
+## ─── i18n ─────────────────────────────────────────────────────────────────────
+
+STRINGS = {
+    "en": {
+        "help": """**Expire Bot** — auto-delete old messages
 
 **Commands:**
 • `{p} set <duration>` — set retention (e.g. `1h`, `7d`, `30d`)
 • `{p} off` / `{p} unset` — disable retention for this room
 • `{p} status` / `{p} show` — current setting
 • `{p} clean` — force cleanup now
+• `{p} set lang <ru|en>` — change bot language
 • `{p} help` — this message
 
 **Durations:** `30m`, `1h`, `6h`, `1d`, `7d`, `30d`, `1y`, `10h 15m`, `1d 12h`
@@ -166,7 +171,92 @@ State events (room name, topic, members) are preserved.
 • Bot management is restricted to authorized admins
 • If bot lacks permissions, it will notify you
 
-_Cleanup runs automatically every few minutes._"""
+_Cleanup runs automatically every few minutes._""",
+        "default_retention": "**Default retention: {dur}.**",
+        "no_redact_warning": "\n\n**Warning:** I don't have redact permissions in this room yet. "
+            "Please set my power level to **50** (moderator) so I can work.",
+        "power_lost": "**Warning:** my power level was reduced. "
+            "I can no longer redact messages. Retention is paused until permissions are restored.",
+        "not_admin": "You are not in the bot's admin whitelist.",
+        "no_power": "Only room moderators (power level {min_power}+) can configure the bot.",
+        "no_power_admin": "Only whitelisted admins can configure the bot.",
+        "set_usage": "Usage: `{p} set <duration>` (e.g. `7d`, `1h`, `10h 15m`)",
+        "unknown_cmd": "Unknown command: `{cmd}`. Try `{p} help`",
+        "status_active": "**Retention:** {dur}\n**Set by:** {set_by}\n**Permissions:** {perms}",
+        "status_inactive": "No retention set for this room.\n**Permissions:** {perms}\nUse `{p} set <duration>` to enable.",
+        "perms_ok": "OK",
+        "perms_missing": "MISSING — need power level 50+",
+        "bad_duration": "Can't parse `{dur}`. Examples: `1h`, `7d`, `30d`, `10h 15m`, `1d 12h`. Minimum: `1m`.",
+        "over_max": "Maximum retention is **{max}**.",
+        "no_redact_set": "I don't have redact permissions. Please set my power level to **50** (moderator) first.",
+        "retention_set": "Retention set to **{dur}**. Messages older than this will be auto-deleted.",
+        "cleaned_n": "Cleaned **{n}** message(s).",
+        "cleaned_expired_n": "Cleaned **{n}** expired message(s).",
+        "already_off": "Retention is already disabled for this room.",
+        "retention_off": "Retention disabled. Messages will no longer be auto-deleted.",
+        "no_redact_clean": "I don't have redact permissions in this room. Set my power level to **50** first.",
+        "clean_running": "Cleanup is already running. Please wait.",
+        "clean_start": "Starting cleanup...",
+        "clean_done": "Done. Cleaned **{n}** message(s).",
+        "clean_nothing": "Nothing to clean.",
+        "clean_error": "Cleanup error: {err}",
+        "lang_set": "Language set to **English**.",
+        "lang_unknown": "Unknown language `{lang}`. Use `{p} set lang ru` or `{p} set lang en`.",
+    },
+    "ru": {
+        "help": """**Expire Bot** — автоудаление старых сообщений
+
+**Команды:**
+• `{p} set <время>` — установить срок хранения (напр. `1h`, `7d`, `30d`)
+• `{p} off` / `{p} unset` — отключить удаление для этой комнаты
+• `{p} status` / `{p} show` — текущие настройки
+• `{p} clean` — принудительная очистка
+• `{p} set lang <ru|en>` — сменить язык бота
+• `{p} help` — это сообщение
+
+**Интервалы:** `30m`, `1h`, `6h`, `1d`, `7d`, `30d`, `1y`, `10h 15m`, `1d 12h`
+
+**Что удаляется:** весь контент — текст, фото, аудио, видео, файлы, стикеры, голосовые, зашифрованные сообщения.
+Состояния комнаты (название, описание, участники) сохраняются.
+
+**Разрешения:**
+• Боту нужен уровень **модератора** (50+) для удаления сообщений
+• Управление ботом доступно только авторизованным админам
+• Если у бота нет прав, он уведомит вас
+
+_Очистка запускается автоматически каждые несколько минут._""",
+        "default_retention": "**Срок хранения по умолчанию: {dur}.**",
+        "no_redact_warning": "\n\n**Внимание:** у меня нет прав на удаление сообщений. "
+            "Пожалуйста, установите мой уровень доступа на **50** (модератор).",
+        "power_lost": "**Внимание:** мой уровень доступа был понижен. "
+            "Я больше не могу удалять сообщения. Удаление приостановлено до восстановления прав.",
+        "not_admin": "Вы не в списке администраторов бота.",
+        "no_power": "Только модераторы комнаты (уровень {min_power}+) могут настраивать бота.",
+        "no_power_admin": "Только авторизованные админы могут настраивать бота.",
+        "set_usage": "Использование: `{p} set <время>` (напр. `7d`, `1h`, `10h 15m`)",
+        "unknown_cmd": "Неизвестная команда: `{cmd}`. Попробуйте `{p} help`",
+        "status_active": "**Срок хранения:** {dur}\n**Установил:** {set_by}\n**Разрешения:** {perms}",
+        "status_inactive": "Срок хранения не установлен.\n**Разрешения:** {perms}\nИспользуйте `{p} set <время>` для включения.",
+        "perms_ok": "OK",
+        "perms_missing": "НЕТ — нужен уровень 50+",
+        "bad_duration": "Не могу разобрать `{dur}`. Примеры: `1h`, `7d`, `30d`, `10h 15m`, `1d 12h`. Минимум: `1m`.",
+        "over_max": "Максимальный срок хранения — **{max}**.",
+        "no_redact_set": "У меня нет прав на удаление. Установите мой уровень доступа на **50** (модератор).",
+        "retention_set": "Срок хранения установлен: **{dur}**. Сообщения старше этого срока будут удалены автоматически.",
+        "cleaned_n": "Удалено **{n}** сообщений.",
+        "cleaned_expired_n": "Удалено **{n}** просроченных сообщений.",
+        "already_off": "Удаление уже отключено для этой комнаты.",
+        "retention_off": "Удаление отключено. Сообщения больше не будут удаляться автоматически.",
+        "no_redact_clean": "У меня нет прав на удаление в этой комнате. Установите мой уровень на **50**.",
+        "clean_running": "Очистка уже выполняется. Подождите.",
+        "clean_start": "Начинаю очистку...",
+        "clean_done": "Готово. Удалено **{n}** сообщений.",
+        "clean_nothing": "Нечего чистить.",
+        "clean_error": "Ошибка очистки: {err}",
+        "lang_set": "Язык изменён на **русский**.",
+        "lang_unknown": "Неизвестный язык `{lang}`. Используйте `{p} set lang ru` или `{p} set lang en`.",
+    },
+}
 
 
 # ─── Database ─────────────────────────────────────────────────────────────────
@@ -219,6 +309,12 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_tracked_room_ts "
             "ON tracked_events (room_id, timestamp_ms)"
         )
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS room_language (
+                room_id TEXT PRIMARY KEY,
+                lang TEXT NOT NULL DEFAULT 'en'
+            )
+        """)
         await self.db.commit()
 
     async def ensure_connected(self):
@@ -245,6 +341,20 @@ class Database:
         await self.db.execute("DELETE FROM room_retention WHERE room_id = ?", (room_id,))
         await self.db.commit()
 
+    async def get_language(self, room_id: str) -> str:
+        async with self.db.execute(
+            "SELECT lang FROM room_language WHERE room_id = ?", (room_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else "en"
+
+    async def set_language(self, room_id: str, lang: str):
+        await self.db.execute(
+            "INSERT OR REPLACE INTO room_language (room_id, lang) VALUES (?, ?)",
+            (room_id, lang),
+        )
+        await self.db.commit()
+
     async def remove_room_data(self, room_id: str):
         """Remove all data for a room."""
         await self.db.execute("DELETE FROM room_retention WHERE room_id = ?", (room_id,))
@@ -252,6 +362,7 @@ class Database:
         await self.db.execute("DELETE FROM cleanup_stats WHERE room_id = ?", (room_id,))
         await self.db.execute("DELETE FROM greeted_rooms WHERE room_id = ?", (room_id,))
         await self.db.execute("DELETE FROM tracked_events WHERE room_id = ?", (room_id,))
+        await self.db.execute("DELETE FROM room_language WHERE room_id = ?", (room_id,))
         await self.db.commit()
 
     async def get_retention(self, room_id: str) -> tuple[int, str, int] | None:
@@ -391,7 +502,8 @@ class ExpireBot:
         self.min_power = config.get("min_power_level", 50)
         self.prefix = config.get("command_prefix", "!expire")
         self.cmd_read_limit = config.get("cmd_read_limit", 24)
-        self.help_text = HELP_TEMPLATE.format(p=self.prefix)
+        # Language cache: room_id → "en"/"ru" (loaded from DB on first use)
+        self._lang_cache: dict[str, str] = {}
         self.notify_cleanup = config.get("notify_cleanup", False)
 
         # Admin whitelist: None = everyone with power level, list = only these users
@@ -482,9 +594,19 @@ class ExpireBot:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda: asyncio.create_task(self._signal_shutdown()))
 
-        # Login / restore session
-        if not await self._authenticate():
-            return
+        # Login / restore session (retry until Synapse is up)
+        max_auth_attempts = 60  # 5 minutes total
+        for attempt in range(1, max_auth_attempts + 1):
+            try:
+                if await self._authenticate():
+                    break
+                logger.warning(f"Auth attempt {attempt}/{max_auth_attempts} failed, retrying in 5s...")
+            except Exception as e:
+                logger.warning(f"Auth attempt {attempt}/{max_auth_attempts} error: {e}, retrying in 5s...")
+            if attempt == max_auth_attempts:
+                logger.error("All auth attempts exhausted, exiting")
+                return
+            await asyncio.sleep(5)
 
         # Register callbacks
         self.client.add_event_callback(self._on_message, RoomMessageText)
@@ -534,12 +656,39 @@ class ExpireBot:
             f"E2E: {'enabled' if self.client.olm else 'disabled'}. Starting loops."
         )
 
-        # Run sync + cleanup in parallel
-        # sync_forever handles E2E key management automatically
-        await asyncio.gather(
-            self.client.sync_forever(timeout=self.sync_timeout),
-            self._cleanup_loop(),
-        )
+        # Run sync + cleanup in parallel, auto-reconnect on failure
+        while not self._shutdown:
+            try:
+                await asyncio.gather(
+                    self.client.sync_forever(timeout=self.sync_timeout),
+                    self._cleanup_loop(),
+                )
+            except Exception as e:
+                if self._shutdown:
+                    break
+                logger.error(f"Sync loop crashed: {e}, reconnecting in 10s...")
+                await asyncio.sleep(10)
+                # Re-authenticate if connection was lost
+                try:
+                    resp = await asyncio.wait_for(self.client.whoami(), timeout=10)
+                    if not hasattr(resp, "user_id"):
+                        logger.warning("Session lost, re-authenticating...")
+                        for attempt in range(12):
+                            try:
+                                if await self._authenticate():
+                                    break
+                            except Exception:
+                                pass
+                            await asyncio.sleep(5)
+                except Exception:
+                    logger.warning("Whoami failed, re-authenticating...")
+                    for attempt in range(12):
+                        try:
+                            if await self._authenticate():
+                                break
+                        except Exception:
+                            pass
+                        await asyncio.sleep(5)
 
     async def _authenticate(self) -> bool:
         """Login or restore session. Returns True on success."""
@@ -554,7 +703,7 @@ class ExpireBot:
                     device_id=saved["device_id"],
                     access_token=token,
                 )
-                resp = await asyncio.wait_for(self.client.whoami(), timeout=15)
+                resp = await asyncio.wait_for(self.client.whoami(), timeout=30)
                 if hasattr(resp, "user_id"):
                     logger.info(
                         f"Session restored as {resp.user_id} "
@@ -570,7 +719,7 @@ class ExpireBot:
             if saved and saved.get("device_id"):
                 self.client.device_id = saved["device_id"]
             resp = await asyncio.wait_for(
-                self.client.login(self.password, device_name="expire-bot"), timeout=15,
+                self.client.login(self.password, device_name="expire-bot"), timeout=30,
             )
             if isinstance(resp, LoginResponse):
                 self._save_session(resp.device_id, resp.access_token)
@@ -657,12 +806,25 @@ class ExpireBot:
         if event.state_key != self.user_id:
             return
         if event.membership in ("leave", "ban"):
-            # Kicked/banned — clean up all room data
+            # Kicked/banned — clean up room data but keep greeted flag for rejoin
             await self.db.remove_room_data(room.room_id)
             logger.info(f"Removed from {room.room_id}, cleared all data")
             return
         if event.membership != "join":
             return
+
+        # Re-establish E2E session on every join (including rejoin after kick)
+        if room.encrypted and self.client.olm:
+            try:
+                if self.client.should_query_keys:
+                    await asyncio.wait_for(self.client.keys_query(), timeout=15)
+                self._trust_all_devices()
+                await asyncio.wait_for(
+                    self.client.share_group_session(room.room_id), timeout=15,
+                )
+                logger.info(f"E2E session established for {room.display_name}")
+            except Exception as e:
+                logger.warning(f"E2E session init failed for {room.display_name}: {e}")
 
         # Only send help on first join (not on restart)
         if await self.db.is_greeted(room.room_id):
@@ -674,13 +836,10 @@ class ExpireBot:
             await self.db.set_retention(room.room_id, self.default_retention, self.user_id)
             logger.info(f"Default retention {format_duration(self.default_retention)} set for {room.room_id}")
 
-        msg = self.help_text + f"\n\n**Default retention: {format_duration(self.default_retention)}.**"
-        # _can_redact will fetch power_levels via API if not in cache (federation)
+        help_text = await self._t(room.room_id, "help")
+        msg = help_text + "\n\n" + await self._t(room.room_id, "default_retention", dur=format_duration(self.default_retention))
         if not await self._can_redact(room):
-            msg += (
-                "\n\n**Warning:** I don't have redact permissions in this room yet. "
-                "Please set my power level to **50** (moderator) so I can work."
-            )
+            msg += await self._t(room.room_id, "no_redact_warning")
         await self._send(room.room_id, msg)
         await self.db.mark_greeted(room.room_id)
         logger.info(f"Joined {room.display_name} ({room.room_id}), encrypted={room.encrypted}")
@@ -694,11 +853,7 @@ class ExpireBot:
         can_redact = await self._can_redact(room)
 
         if retention and not can_redact:
-            await self._send(
-                room.room_id,
-                "**Warning:** my power level was reduced. "
-                "I can no longer redact messages. Retention is paused until permissions are restored.",
-            )
+            await self._send(room.room_id, await self._t(room.room_id, "power_lost"))
         elif retention and can_redact:
             logger.info(f"Permissions restored in {room.room_id}")
 
@@ -744,11 +899,13 @@ class ExpireBot:
         self._decrypt_fail_sessions.add(event.session_id)
 
         if len(self._decrypt_fail_sessions) >= self._e2e_reset_threshold:
-            logger.error(
-                f"E2E BROKEN: {len(self._decrypt_fail_sessions)} unique undecryptable sessions "
-                f"in {int(now - self._decrypt_fail_since)}s — nuking E2E store and restarting"
+            logger.warning(
+                f"E2E: {len(self._decrypt_fail_sessions)} unique undecryptable sessions "
+                f"in {int(now - self._decrypt_fail_since)}s — re-querying keys (store preserved)"
             )
-            await self._nuke_e2e_and_restart()
+            await self._soft_e2e_recovery()
+            self._decrypt_fail_sessions.clear()
+            self._decrypt_fail_since = 0.0
 
     def _ensure_retry_worker(self):
         """Start the retry decryption worker if not already running."""
@@ -810,55 +967,41 @@ class ExpireBot:
             for eid in to_remove:
                 self._decrypt_retry_queue.pop(eid, None)
 
-            # If all retries exhausted and none succeeded — E2E is broken, nuke
+            # If all retries exhausted — log and move on (don't nuke store)
             if to_remove and not self._decrypt_retry_queue:
-                # Check if any succeeded (fail_sessions would be cleared)
                 if self._decrypt_fail_sessions:
-                    logger.error(
+                    logger.warning(
                         f"All retry attempts failed for {len(self._decrypt_fail_sessions)} session(s) "
-                        f"— nuking E2E store and restarting"
+                        f"— skipping (E2E store preserved, keys may arrive later)"
                     )
-                    await self._nuke_e2e_and_restart()
-                    return
+                    self._decrypt_fail_sessions.clear()
+                    self._decrypt_fail_since = 0.0
 
             if self._decrypt_retry_queue:
                 sleep_for = max(1, next_wake - time.time())
                 await asyncio.sleep(sleep_for)
 
-    async def _nuke_e2e_and_restart(self):
-        """Delete E2E store and exit. Docker restart will re-login with fresh device."""
-        import shutil
-        # Reset scan state so history gets re-imported after restart
+    async def _soft_e2e_recovery(self):
+        """Re-query device keys and re-share group sessions without wiping store."""
         try:
-            await self.db.db.execute("UPDATE room_scan_state SET fully_cleaned = 0")
-            await self.db.db.commit()
-        except Exception:
-            pass
-        try:
-            await self.db.close()
-        except Exception:
-            pass
-        try:
-            await self.client.close()
-        except Exception:
-            pass
-        # Remove session file so next start does a fresh login
-        session_file = self._session_file()
-        if os.path.exists(session_file):
-            os.remove(session_file)
-            logger.info(f"Removed session file: {session_file}")
-        # Nuke E2E crypto store
-        store = self.store_path
-        if os.path.isdir(store):
-            for entry in os.listdir(store):
-                path = os.path.join(store, entry)
-                if os.path.isdir(path):
-                    shutil.rmtree(path)
-                else:
-                    os.remove(path)
-            logger.info(f"Wiped E2E store: {store}")
-        logger.error("Exiting for auto-restart with fresh E2E session")
-        sys.exit(1)
+            if self.client.olm:
+                if self.client.should_query_keys:
+                    await asyncio.wait_for(self.client.keys_query(), timeout=15)
+                    logger.info("E2E recovery: re-queried device keys")
+                self._trust_all_devices()
+                # Re-share group sessions in encrypted rooms
+                count = 0
+                for room_id, room in self.client.rooms.items():
+                    if not room.encrypted or count >= 5:
+                        break
+                    try:
+                        await self.client.share_group_session(room_id)
+                        count += 1
+                    except Exception:
+                        pass
+                logger.info(f"E2E recovery: re-shared sessions in {count} rooms")
+        except Exception as e:
+            logger.warning(f"E2E soft recovery failed: {e}")
 
     # ─── Event tracking (maubot-style) ───────────────────────────────
 
@@ -918,7 +1061,7 @@ class ExpireBot:
 
         # Admin whitelist — block all commands from non-admins
         if self.admins and not self._match_admin(event.sender):
-            await self._send(room.room_id, "You are not in the bot's admin whitelist.", event.event_id)
+            await self._send(room.room_id, await self._t(room.room_id, "not_admin"), event.event_id)
             return
 
         # Rate limit commands per user
@@ -934,12 +1077,16 @@ class ExpireBot:
         reply_to = event.event_id
 
         if cmd == "help":
-            await self._send(room.room_id, self.help_text, reply_to)
+            await self._send(room.room_id, await self._t(room.room_id, "help"), reply_to)
         elif cmd in ("status", "show"):
             await self._cmd_status(room, reply_to)
         elif cmd == "set":
             if len(args) < 2:
-                await self._send(room.room_id, f"Usage: `{self.prefix} set <duration>` (e.g. `7d`, `1h`, `10h 15m`)", reply_to)
+                await self._send(room.room_id, await self._t(room.room_id, "set_usage"), reply_to)
+                return
+            # Handle "set lang ru/en"
+            if args[1].lower() == "lang" and len(args) >= 3:
+                await self._cmd_set_lang(room, event, args[2].lower(), reply_to)
                 return
             await self._cmd_set(room, event, " ".join(args[1:]), reply_to)
         elif cmd in ("off", "unset"):
@@ -949,72 +1096,61 @@ class ExpireBot:
         elif parse_duration(cmd):
             await self._cmd_set(room, event, " ".join(args), reply_to)
         else:
-            await self._send(room.room_id, f"Unknown command: `{cmd}`. Try `{self.prefix} help`", reply_to)
+            await self._send(room.room_id, await self._t(room.room_id, "unknown_cmd", cmd=cmd), reply_to)
 
     # ─── Commands ─────────────────────────────────────────────────────────
 
     async def _cmd_status(self, room: MatrixRoom, reply_to: str | None = None):
         info = await self.db.get_retention(room.room_id)
         can_redact = await self._can_redact(room)
+        perms = await self._t(room.room_id, "perms_ok" if can_redact else "perms_missing")
 
         if info:
             retention_s, set_by, set_at = info
             dur = format_duration(retention_s)
-            status = f"**Retention:** {dur}\n"
-            status += f"**Set by:** {set_by}\n"
-            status += f"**Permissions:** {'OK' if can_redact else 'MISSING — need power level 50+'}"
+            status = await self._t(room.room_id, "status_active", dur=dur, set_by=set_by, perms=perms)
         else:
-            status = "No retention set for this room.\n"
-            status += f"**Permissions:** {'OK' if can_redact else 'MISSING — need power level 50+'}\n"
-            status += f"Use `{self.prefix} set <duration>` to enable."
+            status = await self._t(room.room_id, "status_inactive", perms=perms)
 
         await self._send(room.room_id, status, reply_to)
 
+    async def _cmd_set_lang(self, room: MatrixRoom, event: RoomMessageText, lang: str, reply_to: str | None = None):
+        if not await self._has_power(room, event.sender):
+            reason = await self._t(room.room_id, "no_power_admin" if self.admins else "no_power", min_power=self.min_power)
+            await self._send(room.room_id, reason, reply_to)
+            return
+        if lang not in ("ru", "en"):
+            await self._send(room.room_id, await self._t(room.room_id, "lang_unknown", lang=lang), reply_to)
+            return
+        await self.db.set_language(room.room_id, lang)
+        self._lang_cache[room.room_id] = lang
+        await self._send(room.room_id, await self._t(room.room_id, "lang_set"), reply_to)
+        logger.info(f"Language set: {room.room_id} → {lang} by {event.sender}")
+
     async def _cmd_set(self, room: MatrixRoom, event: RoomMessageText, duration_str: str, reply_to: str | None = None):
         if not await self._has_power(room, event.sender):
-            reason = "Only whitelisted admins can configure the bot." if self.admins \
-                else f"Only room moderators (power level {self.min_power}+) can configure the bot."
+            reason = await self._t(room.room_id, "no_power_admin" if self.admins else "no_power", min_power=self.min_power)
             await self._send(room.room_id, reason, reply_to)
             return
 
         seconds = parse_duration(duration_str)
         if not seconds or seconds < 60:
-            await self._send(
-                room.room_id,
-                f"Can't parse `{duration_str}`. "
-                "Examples: `1h`, `7d`, `30d`, `10h 15m`, `1d 12h`. Minimum: `1m`.",
-                reply_to,
-            )
+            await self._send(room.room_id, await self._t(room.room_id, "bad_duration", dur=duration_str), reply_to)
             return
 
         if seconds > self.max_retention:
-            await self._send(
-                room.room_id,
-                f"Maximum retention period is **{format_duration(self.max_retention)}**.",
-                reply_to,
-            )
+            await self._send(room.room_id, await self._t(room.room_id, "over_max", max=format_duration(self.max_retention)), reply_to)
             return
 
         if not await self._can_redact(room):
-            await self._send(
-                room.room_id,
-                "I need **moderator** rights (power level 50+) to redact messages.\n"
-                "Please promote me first, then try again.",
-                reply_to,
-            )
+            await self._send(room.room_id, await self._t(room.room_id, "no_redact_set"), reply_to)
             return
 
         await self.db.set_retention(room.room_id, seconds, event.sender)
-        # Trigger initial history import for this room
         await self.db.clear_scan_state(room.room_id)
         dur = format_duration(seconds)
-        await self._send(
-            room.room_id,
-            f"Retention set to **{dur}**.",
-            reply_to,
-        )
+        await self._send(room.room_id, await self._t(room.room_id, "retention_set", dur=dur), reply_to)
         logger.info(f"Retention set: {room.room_id} → {dur} by {event.sender}")
-        # Fire-and-forget: import + cleanup in background (don't block sync)
         self._spawn_bg(self._bg_set_cleanup(room.room_id, seconds))
 
     async def _bg_set_cleanup(self, room_id: str, retention_seconds: int):
@@ -1026,49 +1162,42 @@ class ExpireBot:
                 if count > 0:
                     await self.db.log_cleanup(room_id, count)
                     if self.notify_cleanup:
-                        await self._send(room_id, f"Cleaned **{count}** message(s).")
+                        await self._send(room_id, await self._t(room_id, "cleaned_n", n=count))
         except Exception as e:
             logger.error(f"Background set cleanup failed for {room_id}: {e}")
 
     async def _cmd_off(self, room: MatrixRoom, event: RoomMessageText, reply_to: str | None = None):
         if not await self._has_power(room, event.sender):
-            reason = "Only whitelisted admins can configure the bot." if self.admins \
-                else f"Only room moderators (power level {self.min_power}+) can configure the bot."
+            reason = await self._t(room.room_id, "no_power_admin" if self.admins else "no_power", min_power=self.min_power)
             await self._send(room.room_id, reason, reply_to)
             return
 
         info = await self.db.get_retention(room.room_id)
         if not info:
-            await self._send(room.room_id, "Retention is already disabled for this room.", reply_to)
+            await self._send(room.room_id, await self._t(room.room_id, "already_off"), reply_to)
             return
 
         await self.db.remove_retention(room.room_id)
         await self.db.clear_scan_state(room.room_id)
         await self.db.clear_tracked_events(room.room_id)
-        await self._send(room.room_id, "Retention disabled. Messages will no longer be auto-deleted.", reply_to)
+        await self._send(room.room_id, await self._t(room.room_id, "retention_off"), reply_to)
         logger.info(f"Retention disabled: {room.room_id} by {event.sender}")
 
     async def _cmd_clean(self, room: MatrixRoom, event: RoomMessageText, reply_to: str | None = None):
         if not await self._has_power(room, event.sender):
-            reason = "Only whitelisted admins can run cleanup." if self.admins \
-                else f"Only room moderators (power level {self.min_power}+) can run cleanup."
+            reason = await self._t(room.room_id, "no_power_admin" if self.admins else "no_power", min_power=self.min_power)
             await self._send(room.room_id, reason, reply_to)
             return
 
         if not await self._can_redact(room):
-            await self._send(
-                room.room_id,
-                "I don't have redact permissions. Please set my power level to 50+.",
-                reply_to,
-            )
+            await self._send(room.room_id, await self._t(room.room_id, "no_redact_clean"), reply_to)
             return
 
-        # Only one clean at a time (across all rooms)
         if self._clean_lock.locked():
-            await self._send(room.room_id, "Cleanup is already running. Please wait.", reply_to)
+            await self._send(room.room_id, await self._t(room.room_id, "clean_running"), reply_to)
             return
 
-        await self._send(room.room_id, "Starting cleanup...", reply_to)
+        await self._send(room.room_id, await self._t(room.room_id, "clean_start"), reply_to)
         # Fire-and-forget: full clean in background (don't block sync)
         self._spawn_bg(self._bg_clean(room.room_id))
 
@@ -1109,13 +1238,13 @@ class ExpireBot:
 
                 if total > 0:
                     await self.db.log_cleanup(room_id, total)
-                    await self._send(room_id, f"Done. Cleaned **{total}** message(s).")
+                    await self._send(room_id, await self._t(room_id, "clean_done", n=total))
                 else:
-                    await self._send(room_id, "Nothing to clean.")
+                    await self._send(room_id, await self._t(room_id, "clean_nothing"))
         except Exception as e:
             logger.error(f"Background clean failed for {room_id}: {e}")
             try:
-                await self._send(room_id, f"Cleanup error: {e}")
+                await self._send(room_id, await self._t(room_id, "clean_error", err=str(e)))
             except Exception:
                 pass
 
@@ -1170,7 +1299,7 @@ class ExpireBot:
                 if count > 0:
                     await self.db.log_cleanup(room_id, count)
                     if self.notify_cleanup:
-                        await self._send(room_id, f"Cleaned **{count}** expired message(s).")
+                        await self._send(room_id, await self._t(room_id, "cleaned_expired_n", n=count))
                 total += count
                 if total >= self.max_redacts:
                     logger.info(f"Redact limit reached ({self.max_redacts}), continuing next cycle")
@@ -1315,6 +1444,24 @@ class ExpireBot:
                 logger.info(f"Skipped {len(skip_ids)} un-redactable events in {room_id[:20]}")
 
         return redacted
+
+    # ─── i18n ──────────────────────────────────────────────────────────────
+
+    async def _get_lang(self, room_id: str) -> str:
+        """Get language for room (cached)."""
+        if room_id not in self._lang_cache:
+            self._lang_cache[room_id] = await self.db.get_language(room_id)
+        return self._lang_cache[room_id]
+
+    async def _t(self, room_id: str, key: str, **kwargs) -> str:
+        """Translate a string key for the room's language."""
+        lang = await self._get_lang(room_id)
+        strings = STRINGS.get(lang, STRINGS["en"])
+        template = strings.get(key, STRINGS["en"].get(key, key))
+        try:
+            return template.format(p=self.prefix, **kwargs)
+        except (KeyError, IndexError):
+            return template
 
     # ─── E2E trust ─────────────────────────────────────────────────────────
 
