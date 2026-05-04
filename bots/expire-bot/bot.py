@@ -21,6 +21,12 @@ from nio import (
     AsyncClient,
     AsyncClientConfig,
     InviteMemberEvent,
+    KeyVerificationCancel,
+    KeyVerificationEvent,
+    KeyVerificationKey,
+    KeyVerificationMac,
+    KeyVerificationStart,
+    LocalProtocolError,
     LoginResponse,
     MatrixRoom,
     MegolmEvent,
@@ -626,6 +632,27 @@ class ExpireBot:
             logger.error("Homeserver unreachable for 10m, exiting")
             return
 
+        # Manual recovery hatch: EXPIRE_BOT_RESET=1 wipes session.json and
+        # the Olm store before auth, forcing a fresh password login. Use when
+        # E2E is hopelessly broken (key shares stopped, undecryptables piling
+        # up). After reset the bot has a brand-new device, so admins must
+        # kick+reinvite it from each encrypted room to re-establish keys.
+        if os.environ.get("EXPIRE_BOT_RESET") == "1":
+            logger.warning("EXPIRE_BOT_RESET=1, wiping session and Olm store")
+            try:
+                sf = self._session_file()
+                if os.path.exists(sf):
+                    os.unlink(sf)
+                if os.path.isdir(self.store_path):
+                    for f in os.listdir(self.store_path):
+                        p = os.path.join(self.store_path, f)
+                        if os.path.isfile(p):
+                            os.unlink(p)
+                logger.warning("Reset done. Unset EXPIRE_BOT_RESET in .env "
+                               "before next restart or it will reset again.")
+            except Exception:
+                logger.exception("Reset failed, continuing with existing state")
+
         # Login / restore session (retry until Synapse is up)
         max_auth_attempts = 60  # 5 minutes total
         for attempt in range(1, max_auth_attempts + 1):
@@ -648,6 +675,7 @@ class ExpireBot:
         self.client.add_event_callback(self._on_invite, InviteMemberEvent)
         self.client.add_event_callback(self._on_member, RoomMemberEvent)
         self.client.add_event_callback(self._on_power_levels, PowerLevelsEvent)
+        self.client.add_to_device_callback(self._on_key_verification, (KeyVerificationEvent,))
         # Trust all devices after each sync (E2E)
         self.client.add_response_callback(self._on_sync)
 
@@ -767,6 +795,19 @@ class ExpireBot:
                 self.client.login(self.password, device_name="expire-bot"), timeout=30,
             )
             if isinstance(resp, LoginResponse):
+                # Loud alarm if Synapse refused to honor the saved device_id.
+                # When this happens, every encrypted-room sender now sees a new
+                # unverified device for the bot. Strict-policy clients will
+                # silently stop sharing megolm keys, the bot will look "alive
+                # but blind". Recovery: kick+reinvite the bot from each room.
+                expected = saved.get("device_id") if saved else None
+                if expected and resp.device_id != expected:
+                    logger.error(
+                        f"DEVICE_ID CHANGED: requested {expected}, server gave "
+                        f"{resp.device_id}. E2E in encrypted rooms is broken "
+                        f"for senders with strict verification. Kick+reinvite "
+                        f"the bot from each affected room to recover."
+                    )
                 self._save_session(resp.device_id, resp.access_token)
                 self._fresh_login = True
                 logger.info(f"Logged in as {resp.user_id} (device={resp.device_id})")
@@ -888,6 +929,55 @@ class ExpireBot:
         await self._send(room.room_id, msg)
         await self.db.mark_greeted(room.room_id)
         logger.info(f"Joined {room.display_name} ({room.room_id}), encrypted={room.encrypted}")
+
+    async def _on_key_verification(self, event: KeyVerificationEvent):
+        """SAS verification handler. Lets a user verify the bot's device
+        from their client (emoji match) so strict E2E clients will share
+        megolm keys to the bot. Bot can't see emojis so it auto-confirms;
+        the human on the other side compares and decides."""
+        client = self.client
+        try:
+            if isinstance(event, KeyVerificationStart):
+                if self.admins is not None and not self._match_admin(event.sender):
+                    logger.warning(f"Verification request from non-admin {event.sender}, ignoring")
+                    await client.cancel_key_verification(event.transaction_id, reject=True)
+                    return
+                if "emoji" not in event.short_authentication_string:
+                    logger.warning(f"SAS without emoji method from {event.sender}, cancelling")
+                    await client.cancel_key_verification(event.transaction_id, reject=True)
+                    return
+                logger.info(f"SAS verification started by {event.sender} ({event.from_device})")
+                await client.accept_key_verification(event.transaction_id)
+                sas = client.key_verifications[event.transaction_id]
+                await client.to_device(sas.share_key())
+
+            elif isinstance(event, KeyVerificationKey):
+                sas = client.key_verifications.get(event.transaction_id)
+                if sas is None:
+                    return
+                # Bot has no human to compare emojis. Auto-confirm: trust
+                # whoever the admin whitelist already trusts. The user on
+                # the other side still has to confirm on their device.
+                logger.info(f"SAS emoji set received from {event.sender}, auto-confirming")
+                await client.confirm_short_auth_string(event.transaction_id)
+
+            elif isinstance(event, KeyVerificationMac):
+                sas = client.key_verifications.get(event.transaction_id)
+                if sas is None:
+                    return
+                try:
+                    msg = sas.get_mac()
+                except LocalProtocolError as e:
+                    logger.warning(f"SAS MAC failed: {e}")
+                    return
+                await client.to_device(msg)
+                verified = list(sas.verified_devices) if sas.verified_devices else []
+                logger.info(f"SAS verified devices: {verified}")
+
+            elif isinstance(event, KeyVerificationCancel):
+                logger.info(f"SAS cancelled by {event.sender}: {event.reason}")
+        except Exception:
+            logger.exception("Key verification handler crashed")
 
     async def _on_power_levels(self, room: MatrixRoom, event: PowerLevelsEvent):
         """Notify when bot gains or loses redact permissions."""
