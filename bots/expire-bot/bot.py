@@ -1328,15 +1328,22 @@ class ExpireBot:
         if isinstance(result, RoomRedactError):
             msg = str(result.message) if hasattr(result, "message") else str(result)
             status = str(getattr(result, "status_code", ""))
+            msg_low = msg.lower()
             # 429 rate limit → stop batch, retry next cycle
-            if "429" in msg or "429" in status or "limit" in msg.lower():
+            if status == "M_LIMIT_EXCEEDED" or "429" in msg or "limit" in msg_low:
                 self.rate_limiter.set_cooldown()
                 return "stop"
-            # 403/404 → event is un-redactable or already gone, skip permanently
-            if "403" in status or "404" in status or "forbidden" in msg.lower() or "not found" in msg.lower():
-                logger.debug(f"Skipping un-redactable {event_id}: {msg}")
+            # nio puts the matrix errcode in status_code (not the HTTP code).
+            # These mean "won't ever succeed for this event": skip permanently.
+            permanent_codes = {"M_FORBIDDEN", "M_NOT_FOUND", "M_BAD_STATE"}
+            permanent_phrases = (
+                "not in room", "not a member", "no longer in",
+                "forbidden", "not found", "cannot redact", "power level",
+            )
+            if status in permanent_codes or any(p in msg_low for p in permanent_phrases):
+                logger.debug(f"Skipping un-redactable {event_id}: {status} {msg}")
                 return "skip"
-            logger.warning(f"Redact failed {event_id} in {room_id}: {msg}")
+            logger.warning(f"Redact failed {event_id} in {room_id}: {status} {msg}")
             return "stop"
         # Successful redact — gradually reduce backoff
         if self.rate_limiter._backoff > 1.0:
