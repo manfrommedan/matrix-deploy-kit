@@ -14,6 +14,7 @@ import sys
 import time
 import uuid
 
+import aiohttp
 import aiosqlite
 import yaml
 from nio import (
@@ -579,9 +580,35 @@ class ExpireBot:
         data = {"device_id": device_id}
         if access_token:
             data["access_token"] = access_token
-        with open(self._session_file(), "w") as f:
+        # Write+fsync to .tmp then rename so a crash mid-write can't truncate.
+        path = self._session_file()
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
             json.dump(data, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
         logger.info(f"Session saved (device={device_id})")
+
+    async def _wait_homeserver(self, max_wait: int = 600) -> bool:
+        """Poll /_matrix/client/versions until it responds 200."""
+        deadline = time.time() + max_wait
+        backoff = 1
+        url = f"{self.homeserver.rstrip('/')}/_matrix/client/versions"
+        while time.time() < deadline and not self._shutdown:
+            try:
+                timeout = aiohttp.ClientTimeout(total=10)
+                async with aiohttp.ClientSession(timeout=timeout) as s:
+                    async with s.get(url) as r:
+                        if r.status == 200:
+                            logger.info(f"Homeserver reachable ({url})")
+                            return True
+                        logger.warning(f"Homeserver HTTP {r.status}, retry in {backoff}s")
+            except Exception as e:
+                logger.debug(f"Homeserver not ready ({type(e).__name__}: {e}), retry in {backoff}s")
+            await asyncio.sleep(backoff)
+            backoff = min(30, backoff * 2)
+        return False
 
     # ─── Start ─────────────────────────────────────────────────────────────
 
@@ -593,6 +620,11 @@ class ExpireBot:
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda: asyncio.create_task(self._signal_shutdown()))
+
+        # Wait for homeserver before auth so we don't spam Synapse during boot.
+        if not await self._wait_homeserver(max_wait=600):
+            logger.error("Homeserver unreachable for 10m, exiting")
+            return
 
         # Login / restore session (retry until Synapse is up)
         max_auth_attempts = 60  # 5 minutes total
@@ -645,9 +677,12 @@ class ExpireBot:
             if not await self.db.is_greeted(room_id):
                 await self.db.mark_greeted(room_id)
 
-        # Establish Olm sessions only on fresh login (not on restart)
+        # On fresh login establish Olm; on restore re-share group sessions
+        # in case other clients rotated theirs during downtime.
         if self._fresh_login:
             await self._init_encrypted_rooms()
+        else:
+            await self._soft_e2e_recovery()
 
         rooms_with_retention = await self.db.get_all_rooms()
         logger.info(
@@ -710,8 +745,18 @@ class ExpireBot:
                         f"(device={saved['device_id']})"
                     )
                     return True
+                # Only re-login on real token errors. Transient stuff
+                # (M_UNKNOWN, 5xx, network) would otherwise burn a fresh
+                # device and break E2E for everyone.
+                errcode = getattr(resp, "status_code", "")
+                if errcode in ("M_UNKNOWN_TOKEN", "M_MISSING_TOKEN"):
+                    logger.warning(f"Saved session expired ({errcode}), will re-login")
                 else:
-                    logger.warning(f"Saved session expired: {resp}")
+                    logger.warning(
+                        f"whoami transient failure ({errcode or 'unknown'}: "
+                        f"{getattr(resp, 'message', resp)}), keeping session"
+                    )
+                    return False
 
         # 2. Password login — creates device + Olm keys (best for E2E)
         if self.password:
