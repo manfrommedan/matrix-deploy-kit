@@ -566,6 +566,17 @@ class ExpireBot:
         self._decrypt_retry_task: asyncio.Task | None = None
         self._decrypt_max_retries = 3
         self._decrypt_retry_delays = [15, 30, 60]  # seconds between retries
+        # Per-room E2E health: tracks long-term blindness so we can warn
+        # the room when our device is permanently locked out. Memory-only;
+        # restart resets counters which is fine (gives a fresh chance).
+        # We do NOT auto-leave: in private rooms a missed notification would
+        # leave the bot stuck outside with no way to rejoin.
+        self._room_health: dict[str, dict] = {}  # room_id → {failed: [(ts,sender),...], success_ts}
+        self._notify_cooldown: dict[str, float] = {}  # room_id → next allowed notify ts
+        self._health_window = 86400  # 24h evaluation window
+        self._health_min_failures = 10
+        self._notify_cooldown_secs = 7 * 86400  # don't re-warn for a week
+        self._health_check_interval = 3600  # hourly
 
     # ─── Session persistence (device_id for E2E) ──────────────────────────
 
@@ -719,12 +730,13 @@ class ExpireBot:
             f"E2E: {'enabled' if self.client.olm else 'disabled'}. Starting loops."
         )
 
-        # Run sync + cleanup in parallel, auto-reconnect on failure
+        # Run sync + cleanup + health check in parallel, auto-reconnect on failure
         while not self._shutdown:
             try:
                 await asyncio.gather(
                     self.client.sync_forever(timeout=self.sync_timeout),
                     self._cleanup_loop(),
+                    self._health_check_loop(),
                 )
             except Exception as e:
                 if self._shutdown:
@@ -894,10 +906,17 @@ class ExpireBot:
         if event.membership in ("leave", "ban"):
             # Kicked/banned — clean up room data but keep greeted flag for rejoin
             await self.db.remove_room_data(room.room_id)
+            self._room_health.pop(room.room_id, None)
+            self._notify_cooldown.pop(room.room_id, None)
             logger.info(f"Removed from {room.room_id}, cleared all data")
             return
         if event.membership != "join":
             return
+
+        # Fresh start in this room: reset blindness counters so a previous
+        # broken streak doesn't bleed into the recovered session.
+        self._room_health.pop(room.room_id, None)
+        self._notify_cooldown.pop(room.room_id, None)
 
         # Re-establish E2E session on every join (including rejoin after kick)
         if room.encrypted and self.client.olm:
@@ -998,6 +1017,12 @@ class ExpireBot:
         """
         if self._first_sync:
             return
+        # Track for health check. Trim entries older than the window.
+        h = self._room_health.setdefault(room.room_id, {"failed": [], "success_ts": 0.0})
+        now = time.time()
+        cutoff = now - self._health_window
+        h["failed"] = [(t, s) for t, s in h["failed"] if t > cutoff]
+        h["failed"].append((now, event.sender))
         logger.warning(
             f"Undecryptable event {event.event_id} in {room.display_name} "
             f"from {event.sender} (session {event.session_id})"
@@ -1138,6 +1163,57 @@ class ExpireBot:
         except Exception as e:
             logger.warning(f"E2E soft recovery failed: {e}")
 
+    async def _health_check_loop(self):
+        """Detect rooms where the bot is permanently blind (cannot decrypt
+        for >24h despite many incoming events). Sends a one-shot notification
+        in the room asking for kick+reinvite. Does NOT auto-leave: in private
+        rooms a missed notification would strand the bot outside.
+        """
+        if os.environ.get("EXPIRE_BOT_HEALTH_NOTIFY", "1") == "0":
+            return
+        # Wait one full window after start before first check, so a fresh
+        # restart (with no decrypts yet) doesn't immediately flag every room.
+        await asyncio.sleep(self._health_window)
+        while not self._shutdown:
+            try:
+                await self._check_blind_rooms()
+            except Exception:
+                logger.exception("Health check crashed")
+            await asyncio.sleep(self._health_check_interval)
+
+    async def _check_blind_rooms(self):
+        now = time.time()
+        cutoff = now - self._health_window
+        for room_id, h in list(self._room_health.items()):
+            recent_failed = [t for t, _ in h["failed"] if t > cutoff]
+            if len(recent_failed) < self._health_min_failures:
+                continue
+            if h["success_ts"] > cutoff:
+                continue  # at least one decrypt succeeded recently, not blind
+            if self._notify_cooldown.get(room_id, 0) > now:
+                continue  # already warned recently
+            room = self.client.rooms.get(room_id)
+            if room is None:
+                continue
+            distinct = len({s for t, s in h["failed"] if t > cutoff})
+            logger.warning(
+                f"Room blind: {room.display_name} ({room_id}) - "
+                f"{len(recent_failed)} undecryptable from {distinct} sender(s) "
+                f"in last 24h, 0 successful. Sending recovery notice."
+            )
+            msg = (
+                "Я не могу расшифровать сообщения в этой комнате уже сутки "
+                f"({len(recent_failed)} событий от {distinct} участник(ов)).\n"
+                "Чтобы починить - кикни меня и пригласи заново. Это пересоздаст "
+                "ключи шифрования. Настройки хранения сохранятся.\n"
+                "Удаление по таймеру продолжает работать в фоне."
+            )
+            try:
+                await self._send(room_id, msg)
+                self._notify_cooldown[room_id] = now + self._notify_cooldown_secs
+            except Exception:
+                logger.exception(f"Failed to send blind-room notice to {room_id}")
+
     # ─── Event tracking (maubot-style) ───────────────────────────────
 
     async def _track_event(self, room: MatrixRoom, event: RoomMessage):
@@ -1147,6 +1223,12 @@ class ExpireBot:
         # Successful decrypt — reset E2E failure counters
         self._decrypt_fail_sessions.clear()
         self._decrypt_fail_since = 0.0
+        # Mark room healthy: a successful decrypt of someone else's message
+        # resets the blindness clock. Our own outbound messages always
+        # decrypt locally so they'd give a false healthy signal.
+        if room.encrypted and event.sender != self.user_id:
+            h = self._room_health.setdefault(room.room_id, {"failed": [], "success_ts": 0.0})
+            h["success_ts"] = time.time()
         # Clear retry queue entries for this room (keys arrived)
         if self._decrypt_retry_queue:
             to_clear = [eid for eid, info in self._decrypt_retry_queue.items()
