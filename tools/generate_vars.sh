@@ -1216,19 +1216,6 @@ else
         } >> "$OUTPUT_FILE"
     fi
 
-    # Federation blacklist (через configuration_extension)
-    if [[ -n "$FEDERATION_BLACKLIST" ]]; then
-        {
-            echo ""
-            echo "# Федерация — blacklist (эти серверы заблокированы)"
-            echo "matrix_synapse_configuration_extension_yaml: |"
-            echo "  ip_range_blacklist: []"
-            echo "  federation_domain_blacklist:"
-            for _domain in $FEDERATION_BLACKLIST; do
-                echo "    - '${_domain}'"
-            done
-        } >> "$OUTPUT_FILE"
-    fi
 fi
 
 if [[ "$MAS_ENABLED" == true ]]; then
@@ -1430,23 +1417,29 @@ fi
 # -----------------------------------------------------------------------------
 # Рекомендованные значения для small/medium homeserver (1-4 CPU, 2-8 GB RAM).
 # Применяются всегда — безопасно для дефолтного workload.
-cat >> "$OUTPUT_FILE" <<'VARSEOF'
 
-
-# -----------------------------------------------------------------------------
-# Synapse tuning — sliding sync (Element X) + caches
-# -----------------------------------------------------------------------------
 # global_factor 1.5 = +50% к каждому in-memory кэшу synapse
-matrix_synapse_caches_global_factor: 1.5
-
-# sync_response_cache_duration 2m снижает Postgres-нагрузку при reconnect
-matrix_synapse_configuration_extension_yaml: |
-  caches:
-    sync_response_cache_duration: 2m
-  # faster_joins ускоряет initial join в большие комнаты (default true с 1.107)
-  experimental_features:
-    faster_joins: true
-VARSEOF
+{
+    echo ""
+    echo "# -----------------------------------------------------------------------------"
+    echo "# Synapse tuning — sliding sync (Element X) + caches"
+    echo "# -----------------------------------------------------------------------------"
+    echo "matrix_synapse_caches_global_factor: 1.5"
+    echo ""
+    echo "# Объединённый extension yaml: perf tuning + federation blacklist (если задан)"
+    echo "matrix_synapse_configuration_extension_yaml: |"
+    echo "  caches:"
+    echo "    sync_response_cache_duration: 2m"
+    echo "  experimental_features:"
+    echo "    faster_joins: true"
+    if [[ -n "${FEDERATION_BLACKLIST:-}" ]]; then
+        echo "  ip_range_blacklist: []"
+        echo "  federation_domain_blacklist:"
+        for _domain in $FEDERATION_BLACKLIST; do
+            echo "    - '${_domain}'"
+        done
+    fi
+} >> "$OUTPUT_FILE"
 
 # --- enable_authenticated_media escape hatch ---
 # Synapse 1.120+ требует auth для legacy media endpoints. Element Web 1.12.x
