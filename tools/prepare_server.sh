@@ -1345,16 +1345,25 @@ fi
 # =============================================================================
 log "Оптимизация сетевого стека..."
 
+# BBR availability check (Linux 4.9+)
+modprobe tcp_bbr 2>/dev/null || true
+_HAS_BBR=0
+if [[ -f /proc/sys/net/ipv4/tcp_available_congestion_control ]] && \
+   grep -q bbr /proc/sys/net/ipv4/tcp_available_congestion_control; then
+    _HAS_BBR=1
+fi
+
 cat > /etc/sysctl.d/99-matrix-network.conf <<'EOF'
-# TCP tuning
+# TCP buffers (16MB max) - long-running sync streams
 net.core.rmem_max = 16777216
 net.core.wmem_max = 16777216
 net.ipv4.tcp_rmem = 4096 87380 16777216
 net.ipv4.tcp_wmem = 4096 65536 16777216
 
-# Connection tracking
+# Connection backlog
 net.core.somaxconn = 65535
 net.core.netdev_max_backlog = 65535
+net.ipv4.tcp_max_syn_backlog = 2048
 
 # Security
 net.ipv4.conf.all.rp_filter = 1
@@ -1363,17 +1372,39 @@ net.ipv4.conf.all.accept_redirects = 0
 net.ipv4.conf.default.accept_redirects = 0
 net.ipv4.conf.all.send_redirects = 0
 
-# Keepalive
-net.ipv4.tcp_keepalive_time = 600
-net.ipv4.tcp_keepalive_intvl = 60
-net.ipv4.tcp_keepalive_probes = 5
+# Keepalive — критично для Matrix /sync long-poll через NAT/proxy.
+# Default 7200s = 2 часа: idle connection silently дропается в NAT.
+net.ipv4.tcp_keepalive_time = 60
+net.ipv4.tcp_keepalive_intvl = 10
+net.ipv4.tcp_keepalive_probes = 6
+
+# Mobile-friendly / low-latency
+net.ipv4.tcp_notsent_lowat = 16384
+net.ipv4.tcp_slow_start_after_idle = 0
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_fin_timeout = 30
+net.ipv4.ip_local_port_range = 10000 65535
 
 # File descriptors
 fs.file-max = 1048576
 EOF
 
+if [[ "$_HAS_BBR" -eq 1 ]]; then
+    cat >> /etc/sysctl.d/99-matrix-network.conf <<'EOF'
+
+# BBR congestion control - significantly better than cubic on lossy/wireless
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+EOF
+fi
+
 sysctl --system >/dev/null 2>&1
-log "Сетевой стек оптимизирован"
+if [[ "$_HAS_BBR" -eq 1 ]]; then
+    log "Сетевой стек оптимизирован (BBR + tcp_keepalive 60s + buffers)"
+else
+    log "Сетевой стек оптимизирован (BBR недоступен - kernel <4.9)"
+fi
 
 
 # =============================================================================

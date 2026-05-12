@@ -1425,6 +1425,88 @@ fi
 fi
 
 
+# -----------------------------------------------------------------------------
+# Performance tuning (Matrix homeserver + Element X + LiveKit)
+# -----------------------------------------------------------------------------
+# Рекомендованные значения для small/medium homeserver (1-4 CPU, 2-8 GB RAM).
+# Применяются всегда — безопасно для дефолтного workload.
+cat >> "$OUTPUT_FILE" <<'VARSEOF'
+
+
+# -----------------------------------------------------------------------------
+# Synapse tuning — sliding sync (Element X) + caches
+# -----------------------------------------------------------------------------
+# global_factor 1.5 = +50% к каждому in-memory кэшу synapse
+matrix_synapse_caches_global_factor: 1.5
+
+# sync_response_cache_duration 2m снижает Postgres-нагрузку при reconnect
+matrix_synapse_configuration_extension_yaml: |
+  caches:
+    sync_response_cache_duration: 2m
+  # faster_joins ускоряет initial join в большие комнаты (default true с 1.107)
+  experimental_features:
+    faster_joins: true
+VARSEOF
+
+# --- enable_authenticated_media escape hatch ---
+# Synapse 1.120+ требует auth для legacy media endpoints. Element Web 1.12.x
+# имеет bug в feature detection — не использует authenticated path → картинки
+# 404. Spantaleev CHANGELOG (2024-11-26) официально рекомендует workaround.
+# По умолчанию НЕ ставим (security). Раскомментируй если столкнёшься с проблемой:
+cat >> "$OUTPUT_FILE" <<'VARSEOF'
+
+# Раскомментируй ЕСЛИ Element Web показывает 404 на картинки.
+# Tradeoff: любой с mxc:// URI скачает media без auth.
+# matrix_synapse_enable_authenticated_media: false
+VARSEOF
+
+
+# -----------------------------------------------------------------------------
+# LiveKit tuning (Element Call performance)
+# -----------------------------------------------------------------------------
+if [[ "$CALLS_ENABLED" == true ]]; then
+cat >> "$OUTPUT_FILE" <<'VARSEOF'
+
+# ICE Lite — faster ICE establishment на public-IP host (без NAT)
+livekit_server_config_rtc_use_ice_lite: true
+
+# Полный extension с performance + safety параметрами:
+# - batch_io: merge UDP system calls → ~30% меньше CPU syscalls
+# - packet_buffer_size: снижено (default video=500, audio=200) под small VPS
+# - congestion_control.allow_pause: SFU паузит low-priority streams под нагрузкой
+# - allow_tcp_fallback: клиент с UDP-block идёт через ICE TCP fallback
+# - audio.active_red_encoding: Opus RED redundancy для lossy mobile networks
+# - room.enabled_codecs: +H.264 для iOS Safari hw-acceleration
+# - limit: защита от accidental overload (1 CPU реалистично ~400 tracks)
+livekit_server_configuration_extension_yaml: |
+  rtc:
+    allow_tcp_fallback: true
+    batch_io:
+      batch_size: 128
+      max_flush_interval: 2ms
+    packet_buffer_size_video: 300
+    packet_buffer_size_audio: 100
+    congestion_control:
+      enabled: true
+      allow_pause: true
+  audio:
+    active_red_encoding: true
+  room:
+    enabled_codecs:
+      - mime: audio/opus
+      - mime: video/vp8
+      - mime: video/h264
+  limit:
+    num_tracks: 800
+    bytes_per_sec: 50000000
+    subscription_limit_video: 30
+    subscription_limit_audio: 50
+  logging:
+    level: info
+VARSEOF
+fi
+
+
 # --- Ketesa (Admin Panel) ---
 if [[ "$SYNAPSE_ADMIN" == true ]]; then
 if [[ "$SYNAPSE_ADMIN_ON_PORT" == true ]]; then
