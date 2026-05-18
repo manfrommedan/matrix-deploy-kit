@@ -2172,7 +2172,7 @@ if [[ "$DRY_RUN" != true ]]; then
         echo "    1. Настрой DNS записи (все поддомены → IP сервера)"
         if [[ "$USE_NGINX" == true ]]; then
             _prepare_cmd="bash tools/prepare-server.sh --domain ${DOMAIN}"
-            [[ -n "$SYNAPSE_ADMIN_PORT" ]] && _prepare_cmd="${_prepare_cmd} --synapse-admin-port ${SYNAPSE_ADMIN_PORT}"
+            [[ -n "$SYNAPSE_ADMIN_PORT" ]] && _prepare_cmd="${_prepare_cmd} --ketesa-port ${SYNAPSE_ADMIN_PORT}"
             [[ -n "$ELEMENT_ADMIN_PORT" ]] && _prepare_cmd="${_prepare_cmd} --element-admin-port ${ELEMENT_ADMIN_PORT}"
             [[ "$NTFY" == true ]] && _prepare_cmd="${_prepare_cmd} --with-ntfy"
             echo "    2. Подготовь сервер:"
@@ -2203,7 +2203,7 @@ if [[ "$DRY_RUN" != true ]]; then
         echo "    1. Настрой DNS записи (все поддомены → IP сервера)"
         if [[ "$USE_NGINX" == true ]]; then
             _prepare_cmd_r="bash prepare-server.sh --domain ${DOMAIN}"
-            [[ -n "$SYNAPSE_ADMIN_PORT" ]] && _prepare_cmd_r="${_prepare_cmd_r} --synapse-admin-port ${SYNAPSE_ADMIN_PORT}"
+            [[ -n "$SYNAPSE_ADMIN_PORT" ]] && _prepare_cmd_r="${_prepare_cmd_r} --ketesa-port ${SYNAPSE_ADMIN_PORT}"
             [[ -n "$ELEMENT_ADMIN_PORT" ]] && _prepare_cmd_r="${_prepare_cmd_r} --element-admin-port ${ELEMENT_ADMIN_PORT}"
             echo "    2. На сервере: ${_prepare_cmd_r}"
         else
