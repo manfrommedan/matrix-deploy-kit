@@ -11,6 +11,12 @@
 ## 1. Базовые параметры (нельзя менять после деплоя!)
 
 ```yaml
+# Авто-подтверждение playbook migration. Без этой строки playbook падает
+# на pre-flight check после крупных breaking change'ов. Подвязка к expected
+# = всегда совпадает, проверка молчит. Если хочешь читать CHANGELOG вручную -
+# замени на конкретную версию (например: v2026.05.18.0).
+matrix_playbook_migration_validated_version: "{{ matrix_playbook_migration_expected_version }}"
+
 # Домен сервера. Matrix ID будут: @user:example.com
 # НЕЛЬЗЯ менять после первого деплоя!
 matrix_domain: example.com
