@@ -838,10 +838,12 @@ fi
 if [[ "$WITH_LANDING_PAGE" == true ]]; then
     if [[ -f "${SCRIPT_DIR}/../templates/index.html" ]]; then
         cp "${SCRIPT_DIR}/../templates/index.html" /var/www/matrix-landing/index.html
+        sed -i "s|SERVER_DOMAIN|${DOMAIN}|g" /var/www/matrix-landing/index.html
         log "Landing page скопирована"
     fi
     if [[ -f "${SCRIPT_DIR}/../templates/tos.html" ]]; then
         cp "${SCRIPT_DIR}/../templates/tos.html" /var/www/matrix-landing/tos.html
+        sed -i "s|SERVER_DOMAIN|${DOMAIN}|g" /var/www/matrix-landing/tos.html
         log "ToS page скопирована"
     fi
 fi
