@@ -1110,6 +1110,15 @@ matrix_homeserver_generic_secret_key: '${SECRET_KEY}'
 
 
 # -----------------------------------------------------------------------------
+# Element Web — фикс null welcome background
+# -----------------------------------------------------------------------------
+# Апстрим default = ~ (yaml null) → config.json получает JSON null →
+# Element Web рендерит <img src={null}> как <img src="null"> и браузер
+# фетчит /null с 404. Подкладываем валидный bundled URL.
+matrix_client_element_branding_welcome_background_url: "themes/element/img/backgrounds/lake.jpg"
+
+
+# -----------------------------------------------------------------------------
 # PostgreSQL
 # -----------------------------------------------------------------------------
 
