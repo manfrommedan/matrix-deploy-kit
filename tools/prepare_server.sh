@@ -630,7 +630,35 @@ fi
 CERT_PATH="${CERT_PATH:-/etc/letsencrypt/live/${DOMAIN}/fullchain.pem}"
 
 if [[ -n "$CERT_PATH" && -f "$CERT_PATH" ]]; then
-    warn "Сертификат для ${DOMAIN} уже существует"
+    # Сертификат уже есть - проверим что в SAN все нужные сабдомены (ntfy и т.д.)
+    _existing_san=$(openssl x509 -in "$CERT_PATH" -text -noout 2>/dev/null \
+        | grep -oP 'DNS:\K[^,[:space:]]+' | sort -u)
+    _missing=()
+    for d in "${CERT_DOMAINS[@]}"; do
+        echo "$_existing_san" | grep -qFx "$d" || _missing+=("$d")
+    done
+    if (( ${#_missing[@]} == 0 )); then
+        warn "Сертификат для ${DOMAIN} уже существует и покрывает все сабдомены"
+    else
+        log "Сертификат существует, но не покрывает: ${_missing[*]} - расширяем"
+        systemctl stop nginx 2>/dev/null || true
+        CERTBOT_DOMAIN_ARGS=()
+        for d in "${CERT_DOMAINS[@]}"; do
+            CERTBOT_DOMAIN_ARGS+=(-d "$d")
+        done
+        if certbot certonly --standalone --non-interactive --agree-tos --expand \
+            --email "${CERTBOT_EMAIL}" \
+            "${CERTBOT_DOMAIN_ARGS[@]}"; then
+            log "Сертификат расширен"
+        else
+            err "Не удалось расширить сертификат. Проверь DNS и попробуй вручную:"
+            _certbot_cmd="certbot certonly --standalone --expand"
+            for d in "${CERT_DOMAINS[@]}"; do
+                _certbot_cmd="${_certbot_cmd} -d ${d}"
+            done
+            err "  ${_certbot_cmd}"
+        fi
+    fi
 elif [[ -n "$CERT_PATH" ]]; then
     # Останавливаем nginx чтобы certbot мог использовать порт 80 (standalone)
     systemctl stop nginx 2>/dev/null || true

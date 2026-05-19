@@ -118,6 +118,10 @@ bash /root/matrix-deploy-kit/deploy.sh
 bash tools/prepare_server.sh --domain example.com \
   --ketesa-port 35805 \
   --element-admin-port 35122 \
+  --livekit-rtc-tcp 23249 \
+  --livekit-rtc-udp 18674 \
+  --livekit-turn-tls 11377 \
+  --livekit-turn-udp 34556 \
   --with-landing-page \
   --with-ntfy
 ```
@@ -126,9 +130,10 @@ bash tools/prepare_server.sh --domain example.com \
 - Обновит систему
 - Создаст deploy-пользователя
 - Установит Docker, Ansible, nginx, certbot
-- Получит SSL-сертификаты
-- Настроит nginx (reverse proxy → Traefik)
+- Получит SSL-сертификаты (включая `ntfy.example.com` если флаг есть). Если cert уже выписан, но добавились новые сабдомены - расширит существующий через `--expand`
+- Настроит nginx (reverse proxy → Traefik) - LiveKit JWT уже прорутится через `matrix.example.com/livekit-jwt-service` благодаря traefik labels
 - Скопирует landing page и страницу ошибок
+- Откроет 4 LiveKit-порта в ufw (если активен)
 
 ### Флаги prepare_server.sh
 

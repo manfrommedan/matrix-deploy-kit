@@ -91,6 +91,10 @@ bash tools/prepare_server.sh \
   --domain example.com \
   --ketesa-port 35805 \
   --element-admin-port 35122 \
+  --livekit-rtc-tcp 23249 \
+  --livekit-rtc-udp 18674 \
+  --livekit-turn-tls 11377 \
+  --livekit-turn-udp 34556 \
   --with-ntfy \
   --with-landing-page
 ```
@@ -98,9 +102,13 @@ bash tools/prepare_server.sh \
 Что настраивается:
 
 - nginx reverse proxy
-- certbot SSL
+- certbot SSL (включая `ntfy.example.com` если `--with-ntfy`)
 - landing page
-- скрытые admin панели
+- скрытые admin панели (Ketesa, Element Admin)
+- **LiveKit** (аудио/видео звонки через Element Web и Element X) — 4 нестандартных порта в файрволе
+- **ntfy** (push-уведомления для Element X / FluffyChat)
+
+Порты LiveKit можно подобрать любые свободные (1024-65535) - они выписываются в файрвол. Порядок флагов: ICE/TCP, ICE/UDP, TURN/TLS, TURN/UDP.
 
 ---
 
@@ -110,6 +118,10 @@ bash tools/prepare_server.sh \
 bash tools/prepare_server.sh \
   --domain example.com \
   --traefik-only \
+  --livekit-rtc-tcp 23249 \
+  --livekit-rtc-udp 18674 \
+  --livekit-turn-tls 11377 \
+  --livekit-turn-udp 34556 \
   --with-ntfy
 ```
 
@@ -158,7 +170,7 @@ bash tools/update.sh
 
 # DNS Setup
 
-Минимальные записи:
+Минимальные A-записи (все → IP сервера):
 
 ```
 example.com
@@ -166,13 +178,13 @@ matrix.example.com
 element.example.com
 ```
 
-Опционально:
+Опционально (с флагом `--with-ntfy`):
 
 ```
 ntfy.example.com
 ```
 
-Все записи должны указывать на IP сервера.
+LiveKit работает по path-маршрутизации через `matrix.example.com/livekit-jwt-service` - отдельный поддомен не нужен.
 
 ---
 
@@ -187,10 +199,16 @@ ntfy.example.com
 Открытые порты:
 
 ```
-80
-443
-8448
+80     HTTP (certbot)
+443    HTTPS
+8448   Federation (если не через 443)
+<LiveKit RTC TCP>    SFU TCP (по флагу --livekit-rtc-tcp)
+<LiveKit RTC UDP>    SFU UDP (по флагу --livekit-rtc-udp)
+<LiveKit TURN TLS>   TURN TLS (по флагу --livekit-turn-tls)
+<LiveKit TURN UDP>   TURN UDP (по флагу --livekit-turn-udp)
 ```
+
+`prepare_server.sh` сам открывает LiveKit порты в `ufw` если они переданы флагами.
 
 ---
 
