@@ -1406,8 +1406,13 @@ VARSEOF
 
 cat >> "$OUTPUT_FILE" <<VARSEOF
 
-# Звонки через Element Web (LiveKit бэкенд)
+# Отдельный Element Call web-клиент не ставим - Element Web сам умеет в LiveKit.
 matrix_element_call_enabled: false
+
+# Включаем RTC backbone: LiveKit-server + JWT service + rtc_foci в well-known.
+# Без этого matrix_rtc_enabled дефолтит в matrix_element_call_enabled (false) -
+# и весь LiveKit-стек остаётся выключен несмотря на порты ниже.
+matrix_rtc_enabled: true
 VARSEOF
 
 if [[ -n "$LIVEKIT_RTC_TCP" ]]; then
