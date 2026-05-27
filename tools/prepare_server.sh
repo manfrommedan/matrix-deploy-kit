@@ -248,7 +248,6 @@ apt-get install -y -qq \
     curl \
     gnupg \
     lsb-release \
-    software-properties-common \
     sudo \
     wget \
     unzip \
