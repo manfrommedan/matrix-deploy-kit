@@ -143,52 +143,79 @@ LiveKit работает по path-маршрутизации через `matrix
 
 # Server Preparation
 
-## nginx + certbot (recommended)
+`prepare_server.sh` ставит Docker / Ansible / just, nginx + certbot (SSL), генерит
+nginx-конфиг и копирует серты для LiveKit/Coturn. Запускается **после** `deploy.sh`.
+
+## Полный пример (nginx + звонки + ntfy + лендинг + админки)
 
 ```bash
-bash tools/prepare_server.sh \
+bash /root/matrix-docker-ansible-deploy/tools/prepare_server.sh \
   --domain example.com \
+  --with-landing-page \
+  --with-ntfy \
   --ketesa-port 35805 \
   --element-admin-port 35122 \
+  --with-firewall \
   --livekit-rtc-tcp 23249 \
   --livekit-rtc-udp 18674 \
   --livekit-turn-tls 11377 \
-  --livekit-turn-udp 34556 \
-  --with-ntfy \
-  --with-landing-page
+  --livekit-turn-udp 34556
 ```
 
-Что настраивается:
+Что делает каждый флаг:
 
-- nginx reverse proxy
-- certbot SSL (включая `ntfy.example.com` если `--with-ntfy`)
-- landing page
-- скрытые admin панели (Ketesa, Element Admin)
-- **LiveKit** (аудио/видео звонки через Element Web и Element X) — 4 нестандартных порта в файрволе
-- **ntfy** (push-уведомления для Element X / FluffyChat)
+- `--domain example.com` — bare-домен (не `matrix.*`); SSL выпускается на `example.com`, `matrix.`, `element.`
+- `--with-landing-page` — лендинг + `/tos` на `matrix.example.com`
+- `--with-ntfy` — поддомен `ntfy.example.com` (push-уведомления) + добавить его в сертификат
+- `--ketesa-port 35805` — Ketesa (админка Synapse) на отдельном «скрытом» порту
+- `--element-admin-port 35122` — Element Admin на отдельном порту
+- `--with-firewall` — включить `ufw` (**без него 4 порта ниже НЕ откроются**)
+- `--livekit-rtc-tcp / --livekit-rtc-udp / --livekit-turn-tls / --livekit-turn-udp` — 4 порта LiveKit (аудио/видео) в `ufw`
 
-Порты LiveKit можно подобрать любые свободные (1024-65535) - они выписываются в файрвол. Порядок флагов: ICE/TCP, ICE/UDP, TURN/TLS, TURN/UDP.
+Порты LiveKit — любые свободные `1024–65535`, порядок: ICE/TCP, ICE/UDP, TURN/TLS, TURN/UDP.
+Если `ufw` не используешь (файрвол у провайдера/в облаке) — убери `--with-firewall` и `--livekit-*`,
+а порты открой там.
 
----
-
-## Traefik-only mode
+## Минимум (звонки/админки настроишь позже)
 
 ```bash
-bash tools/prepare_server.sh \
+bash /root/matrix-docker-ansible-deploy/tools/prepare_server.sh \
   --domain example.com \
-  --traefik-only \
-  --livekit-rtc-tcp 23249 \
-  --livekit-rtc-udp 18674 \
-  --livekit-turn-tls 11377 \
-  --livekit-turn-udp 34556 \
+  --with-landing-page \
   --with-ntfy
 ```
 
-Особенности:
+## Traefik-only (без nginx, SSL через Traefik ACME)
 
-- SSL через Traefik
-- меньше компонентов
-- проще конфигурация
+```bash
+bash /root/matrix-docker-ansible-deploy/tools/prepare_server.sh \
+  --domain example.com \
+  --traefik-only
+```
+
+`--ketesa-port` / `--element-admin-port` / `--with-landing-page` в этом режиме
+не действуют — admin-панели и лендинг настраиваются в `vars.yml`.
+
+## Остальные флаги (по необходимости)
+
+| Флаг | Назначение |
+|---|---|
+| `--email EMAIL` | email для certbot (по умолч. `admin@DOMAIN`) |
+| `--tls13-only` | только TLS 1.3 во всех блоках |
+| `--max-upload MB` | лимит загрузки, синхр. с Synapse (по умолч. 100) |
+| `--federation-on-443` | федерация на 443, не открывать 8448 |
+| `--coturn-stun PORT` | Coturn STUN в ufw (по умолч. 3478) |
+| `--coturn-turns PORT` | Coturn TURNS в ufw (по умолч. 5349) |
+| `--coturn-relay-range MIN:MAX` | Coturn relay UDP в ufw (по умолч. 49152:49172) |
+| `--deploy-user USER` | deploy-юзер (по умолч. `matrix-admin`) |
+| `--ssh-port PORT` | SSH-порт (по умолч. 22) |
+| `--with-ssh-hardening` | укрепить sshd (по умолч. ВЫКЛ) |
+| `--with-fail2ban` | поставить fail2ban (по умолч. ВЫКЛ) |
+| `--swap-size SIZE` | swap (по умолч. 2G; `0` — не создавать) |
+| `--skip-swap` / `--skip-docker` | пропустить swap / Docker |
+| `--data-path PATH` | путь к данным Matrix (по умолч. `/matrix`) |
+| `--dry-run` | показать план, ничего не делать |
+| `-h, --help` | справка |
 
 ---
 
