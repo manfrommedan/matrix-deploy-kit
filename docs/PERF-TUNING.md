@@ -1,6 +1,6 @@
 # Performance Tuning — рекомендации
 
-Дополнительные настройки для оптимизации Matrix homeserver под современные клиенты (Element X с sliding sync, Element Call с LiveKit). Применяй после базового deploy.
+Дополнительные настройки для оптимизации Matrix homeserver под современные клиенты (Element X с нативным sliding sync, Element Call с LiveKit). Применяй после базового deploy.
 
 ## Quick apply
 
@@ -33,10 +33,6 @@ matrix_synapse_configuration_extension_yaml: |
   # Spantaleev в CHANGELOG (2024-11-26) явно описал как escape hatch для совместимости.
   # См. docs/TROUBLESHOOTING.md секцию 2 для tradeoff details.
   # enable_authenticated_media: false
-
-  # Faster joins — default true с 1.107+, но прописываем явно
-  experimental_features:
-    faster_joins: true
 
   # Опционально: устранить FederationDeniedError noise при федерации только
   # с whitelist-доменами (раскомментируй если federation_domain_whitelist задан):
