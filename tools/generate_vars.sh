@@ -1693,20 +1693,13 @@ VARSEOF
 fi
 
 
-# --- Registration (Synapse-native, без MAS) ---
-if [[ "$MAS_ENABLED" == false && "$REGISTRATION" == true ]]; then
-REG_SECRET=$(gen_secret 32)
-cat >> "$OUTPUT_FILE" <<VARSEOF
-
-
-# -----------------------------------------------------------------------------
-# Matrix Registration (регистрация по токенам)
-# -----------------------------------------------------------------------------
-
-matrix_registration_enabled: true
-matrix_registration_admin_secret: '${REG_SECRET}'
-VARSEOF
-fi
+# --- Registration (без MAS) ---
+# ВНИМАНИЕ: matrix-registration (приложение ZerataX) ПОЛНОСТЬЮ УДАЛЁН из плейбука
+# (май 2026). Апстрим жёстко роняет pre-flight на ЛЮБОЙ matrix_registration_*
+# переменной (validate_config.yml), независимо от migration_validated_version.
+# Synapse-native токен-регистрация для не-MAS ветки уже включается выше:
+#   matrix_synapse_enable_registration + matrix_synapse_registration_requires_token
+# Поэтому отдельный matrix_registration_* блок здесь НЕ нужен и НЕ должен возвращаться.
 
 
 # --- Synapse Auto-Compressor ---

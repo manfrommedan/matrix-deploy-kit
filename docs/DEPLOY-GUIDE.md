@@ -129,7 +129,7 @@ bash tools/prepare_server.sh --domain example.com \
 Что произойдёт:
 - Обновит систему
 - Создаст deploy-пользователя
-- Установит Docker, Ansible, nginx, certbot
+- Установит Docker (официальным скриптом get.docker.com), Ansible, nginx, certbot
 - Получит SSL-сертификаты (включая `ntfy.example.com` если флаг есть). Если cert уже выписан, но добавились новые сабдомены - расширит существующий через `--expand`
 - Настроит nginx (reverse proxy → Traefik) - LiveKit JWT уже прорутится через `matrix.example.com/livekit-jwt-service` благодаря traefik labels
 - Скопирует landing page и страницу ошибок
@@ -288,7 +288,10 @@ docker exec matrix-postgres pg_dumpall -U matrix > /root/matrix-backup.sql
 │   ├── generate_vars.sh               # Генератор vars.yml
 │   ├── prepare_server.sh              # Подготовка сервера
 │   ├── update.sh                      # Обновление
-│   └── nuke-user.sh                   # Удаление пользователя
+│   ├── backup.sh                      # Бэкап PostgreSQL
+│   ├── nuke-user.sh                   # Удаление пользователя
+│   ├── tune-system.sh                 # Тюнинг ОС
+│   └── migrate-to-compose-v2.sh       # Миграция docker-compose v1 → v2
 ├── templates/
 │   ├── index.html                     # Landing page
 │   ├── tos.html                       # Terms of Service

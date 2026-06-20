@@ -74,8 +74,8 @@ Reverse proxy (выбрать один):
 
 Опции (nginx режим):
   --email EMAIL             Email для certbot (по умолчанию admin@DOMAIN)
-  --ketesa-port PORT Порт для Ketesa (nginx → Traefik)
-  --element-admin-port PORT Порт для Element Admin (nginx → Traefik)
+  --ketesa-port PORT        Ketesa на скрытом порту (nginx → Traefik)
+  --element-admin-port PORT Element Admin на скрытом порту (nginx → Traefik)
   --with-landing-page       Создать landing page и ToS на matrix.DOMAIN
   --with-ntfy               Включить поддомен ntfy.DOMAIN (push-уведомления)
 
@@ -242,22 +242,19 @@ export LC_ALL="${LC_ALL:-C.UTF-8}" LANG="${LANG:-C.UTF-8}"
 
 apt-get update -qq
 apt-get upgrade -y -qq
+# Только то, что используют скрипты (curl/jq/pwgen/gnupg) + базовая диагностика.
+# apt-transport-https встроен в apt (Debian 10+/Ubuntu 18.04+); lsb-release не нужен —
+# ОС определяется через /etc/os-release.
 apt-get install -y -qq \
-    apt-transport-https \
     ca-certificates \
     curl \
     gnupg \
-    lsb-release \
     sudo \
-    wget \
-    unzip \
-    htop \
-    iotop \
-    net-tools \
     jq \
-    logrotate \
     pwgen \
-    pipx
+    logrotate \
+    htop \
+    iotop
 
 log "Система обновлена"
 
@@ -442,34 +439,14 @@ if [[ "$SKIP_DOCKER" == false ]]; then
     fi
 
     if command -v docker &>/dev/null && docker version --format '{{.Server.Version}}' &>/dev/null; then
-        DOCKER_VER=$(docker version --format '{{.Server.Version}}' 2>/dev/null || echo "unknown")
-        info "Docker уже установлен: ${DOCKER_VER}"
+        info "Docker уже установлен: $(docker version --format '{{.Server.Version}}')"
     else
-        # Официальный apt-репозиторий Docker
-        install -m 0755 -d /etc/apt/keyrings
-
-        if [[ "$OS_ID" == "ubuntu" ]]; then
-            DOCKER_URL="https://download.docker.com/linux/ubuntu"
-            DOCKER_CODENAME="${UBUNTU_CODENAME:-$OS_CODENAME}"
-        else
-            DOCKER_URL="https://download.docker.com/linux/debian"
-            DOCKER_CODENAME="$OS_CODENAME"
-        fi
-
-        curl -fsSL "${DOCKER_URL}/gpg" -o /etc/apt/keyrings/docker.asc
-        chmod a+r /etc/apt/keyrings/docker.asc
-
-        cat > /etc/apt/sources.list.d/docker.sources <<EOF
-Types: deb
-URIs: ${DOCKER_URL}
-Suites: ${DOCKER_CODENAME}
-Components: stable
-Signed-By: /etc/apt/keyrings/docker.asc
-EOF
-
-        apt-get update -qq
-        apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
+        # Официальный скрипт Docker сам определяет дистрибутив и кодовое имя
+        # (Debian/Ubuntu и производные) и ставит engine, cli, containerd, buildx, compose.
+        log "Ставлю Docker (get.docker.com)"
+        curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+        sh /tmp/get-docker.sh
+        rm -f /tmp/get-docker.sh
         log "Docker установлен: $(docker --version)"
     fi
 
@@ -766,8 +743,6 @@ log "Настройка nginx для Matrix..."
 
 NGINX_CONF="/etc/nginx/sites-available/matrix.conf"
 
-# Общий блок проксирования в Traefik
-# shellcheck disable=SC2120
 # Вставка ssl_protocols TLSv1.3 если --tls13-only
 _ssl_extra() {
     if [[ "$TLS13_ONLY" == true ]]; then
@@ -775,11 +750,11 @@ _ssl_extra() {
     fi
 }
 
+# Общий блок проксирования в Traefik
 _proxy_block() {
-    local host_header="${1:-\$host}"
     cat <<PROXYBLOCK
         proxy_pass http://127.0.0.1:81;
-        proxy_set_header Host ${host_header};
+        proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$remote_addr;
         proxy_set_header X-Forwarded-Proto https;
@@ -841,13 +816,16 @@ MEDIABLOCK
 # Страница ошибок и landing page
 mkdir -p /var/www/matrix-landing
 
-# Копируем error.html из шаблонов
+# Резолвим каталог шаблонов один раз (из плейбука: ../templates; из kit: ./templates)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "${SCRIPT_DIR}/../templates/error.html" ]]; then
-    cp "${SCRIPT_DIR}/../templates/error.html" /var/www/matrix-landing/error.html
-    log "Страница ошибок скопирована"
-elif [[ -f "${SCRIPT_DIR}/templates/error.html" ]]; then
-    cp "${SCRIPT_DIR}/templates/error.html" /var/www/matrix-landing/error.html
+_TPL_DIR=""
+for _d in "${SCRIPT_DIR}/../templates" "${SCRIPT_DIR}/templates"; do
+    [[ -d "$_d" ]] && { _TPL_DIR="$_d"; break; }
+done
+
+# Копируем error.html из шаблонов
+if [[ -n "$_TPL_DIR" && -f "$_TPL_DIR/error.html" ]]; then
+    cp "$_TPL_DIR/error.html" /var/www/matrix-landing/error.html
     log "Страница ошибок скопирована"
 else
     # Fallback: генерируем минимальную страницу
@@ -863,35 +841,15 @@ fi
 
 # Landing page шаблоны
 if [[ "$WITH_LANDING_PAGE" == true ]]; then
-    if [[ -f "${SCRIPT_DIR}/../templates/index.html" ]]; then
-        cp "${SCRIPT_DIR}/../templates/index.html" /var/www/matrix-landing/index.html
+    if [[ -n "$_TPL_DIR" && -f "$_TPL_DIR/index.html" ]]; then
+        cp "$_TPL_DIR/index.html" /var/www/matrix-landing/index.html
         sed -i "s|SERVER_DOMAIN|${DOMAIN}|g" /var/www/matrix-landing/index.html
         log "Landing page скопирована"
     fi
-    if [[ -f "${SCRIPT_DIR}/../templates/tos.html" ]]; then
-        cp "${SCRIPT_DIR}/../templates/tos.html" /var/www/matrix-landing/tos.html
+    if [[ -n "$_TPL_DIR" && -f "$_TPL_DIR/tos.html" ]]; then
+        cp "$_TPL_DIR/tos.html" /var/www/matrix-landing/tos.html
         sed -i "s|SERVER_DOMAIN|${DOMAIN}|g" /var/www/matrix-landing/tos.html
         log "ToS page скопирована"
-    fi
-fi
-
-# Branding assets (логотип, фон Element Web)
-mkdir -p /var/www/matrix-landing/branding
-_branding_src=""
-if [[ -d "${SCRIPT_DIR}/../templates" ]]; then
-    _branding_src="${SCRIPT_DIR}/../templates"
-elif [[ -d "${SCRIPT_DIR}/templates" ]]; then
-    _branding_src="${SCRIPT_DIR}/templates"
-fi
-if [[ -n "$_branding_src" ]]; then
-    _branding_count=0
-    for _bf in "$_branding_src"/element-*.svg "$_branding_src"/element-*.png; do
-        [[ -f "$_bf" ]] || continue
-        cp "$_bf" /var/www/matrix-landing/branding/
-        _branding_count=$((_branding_count + 1))
-    done
-    if (( _branding_count > 0 )); then
-        log "Branding: скопировано ${_branding_count} файл(ов) в /var/www/matrix-landing/branding/"
     fi
 fi
 
@@ -1028,19 +986,6 @@ $(_ssl_extra)
         add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
     }
 
-    # Branding assets (логотип, фон)
-    location /branding/ {
-        root /var/www/matrix-landing;
-        expires 1h;
-        add_header Cache-Control "public, no-transform";
-        add_header X-Content-Type-Options nosniff always;
-        add_header X-Frame-Options SAMEORIGIN always;
-        add_header X-XSS-Protection "1; mode=block" always;
-        add_header Content-Security-Policy "frame-ancestors 'self'" always;
-        add_header Referrer-Policy no-referrer always;
-        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
-    }
-
 $(_media_location)
 
     # Всё остальное — в Traefik
@@ -1108,19 +1053,6 @@ $(_ssl_extra)
     add_header Content-Security-Policy "frame-ancestors 'self'" always;
     add_header Referrer-Policy no-referrer always;
     add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
-
-    # Branding assets (логотип, фон)
-    location /branding/ {
-        root /var/www/matrix-landing;
-        expires 1h;
-        add_header Cache-Control "public, no-transform";
-        add_header X-Content-Type-Options nosniff always;
-        add_header X-Frame-Options SAMEORIGIN always;
-        add_header X-XSS-Protection "1; mode=block" always;
-        add_header Content-Security-Policy "frame-ancestors 'self'" always;
-        add_header Referrer-Policy no-referrer always;
-        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
-    }
 
 $(_media_location)
 

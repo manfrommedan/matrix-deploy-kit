@@ -41,15 +41,22 @@ https://github.com/spantaleev/matrix-docker-ansible-deploy
 
 ```
 matrix-deploy-kit/
-├── deploy.sh
+├── deploy.sh                       # bootstrap: клон плейбука + tools/templates + генератор
 ├── tools/
-│   ├── generate_vars.sh
-│   ├── prepare_server.sh
-│   ├── update.sh
-│   └── nuke-user.sh
-└── templates/
-    ├── index.html
-    └── tos.html
+│   ├── generate_vars.sh            # интерактивный генератор vars.yml
+│   ├── prepare_server.sh           # подготовка сервера (nginx/certbot/docker/ansible/just)
+│   ├── update.sh                   # обновление стека
+│   ├── backup.sh                   # бэкап
+│   ├── nuke-user.sh                # полное удаление пользователя
+│   ├── tune-system.sh              # тюнинг ОС
+│   └── migrate-to-compose-v2.sh    # разовая миграция docker-compose v1 → v2
+├── templates/
+│   ├── index.html                  # landing page (matrix.DOMAIN)
+│   ├── tos.html                    # Terms of Service (/tos)
+│   └── error.html                  # страница 502/503/504
+├── bots/
+│   └── expire-bot/                 # бот авто-экспирации аккаунтов
+└── docs/
 ```
 
 ---

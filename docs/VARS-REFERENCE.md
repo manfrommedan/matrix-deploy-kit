@@ -693,9 +693,12 @@ coturn_turn_udp_port: 39521
 matrix_authentication_service_config_account_registration_token_required: true
 
 # Synapse (без MAS):
+matrix_synapse_enable_registration: true
 matrix_synapse_registration_requires_token: true
-matrix_registration_admin_secret: 'xxxxxxxxxxxxxxxxxxx'
 ```
+
+> Роль `matrix-registration` (и переменные `matrix_registration_*`) удалена из
+> плейбука в мае 2026 — токены теперь даёт MAS или нативный Synapse.
 
 ---
 
