@@ -16,11 +16,11 @@ https://github.com/spantaleev/matrix-docker-ansible-deploy
 - [Overview](#overview)
 - [Structure](#structure)
 - [Quick Start](#quick-start)
+- [DNS Setup](#dns-setup)
 - [Server Preparation](#server-preparation)
 - [Matrix Deployment](#matrix-deployment)
 - [Create Admin](#create-admin)
 - [Updating](#updating)
-- [DNS Setup](#dns-setup)
 - [Requirements](#requirements)
 
 ---
@@ -64,29 +64,80 @@ matrix-deploy-kit/
 
 # Quick Start
 
-## 1. Upload to server
+Выполняй по порядку, сверху вниз.
+
+## 1. DNS (заранее)
+
+A-записи на IP сервера — подробности в [DNS Setup](#dns-setup) ниже. Без рабочего DNS
+`prepare_server.sh` не выпустит SSL.
+
+## 2. Залить kit на сервер
 
 ```bash
-scp -r matrix-deploy-kit/ \
-  root@<SERVER_IP>:/root/matrix-deploy-kit/
+scp -r matrix-deploy-kit/ root@<SERVER_IP>:/root/matrix-deploy-kit/
 ```
 
----
-
-## 2. Run deployment
+## 3. Bootstrap — клон плейбука + генератор конфига
 
 ```bash
 ssh root@<SERVER_IP>
-
+apt-get install -y git                  # если git ещё не стоит
 bash /root/matrix-deploy-kit/deploy.sh
 ```
 
-Скрипт:
+Клонирует `matrix-docker-ansible-deploy`, копирует в него `tools/` и `templates/`,
+запускает интерактивный генератор `vars.yml`.
 
-- клонирует matrix playbook
-- копирует tools
-- копирует templates
-- запускает генератор `vars.yml`
+## 4. Подготовка сервера — Docker, nginx, SSL
+
+```bash
+bash /root/matrix-docker-ansible-deploy/tools/prepare_server.sh \
+  --domain example.com [опции]
+```
+
+Флаги и режимы (nginx / Traefik-only, LiveKit-порты, ntfy, landing) — в
+[Server Preparation](#server-preparation).
+
+## 5. Деплой
+
+```bash
+cd /root/matrix-docker-ansible-deploy
+export LC_ALL=C.UTF-8
+just roles
+just install-all
+```
+
+## 6. Создать администратора
+
+```bash
+docker exec matrix-authentication-service \
+  mas-cli manage register-user --yes admin --password '<ПАРОЛЬ>' --admin
+```
+
+Готово — заходи на `https://element.example.com`.
+
+---
+
+# DNS Setup
+
+> Настрой **до** шага 4 (Server Preparation) — `prepare_server.sh` выпускает SSL
+> через certbot по этим записям и делает DNS-предпроверку.
+
+Минимальные A-записи (все → IP сервера):
+
+```
+example.com
+matrix.example.com
+element.example.com
+```
+
+Опционально (с флагом `--with-ntfy`):
+
+```
+ntfy.example.com
+```
+
+LiveKit работает по path-маршрутизации через `matrix.example.com/livekit-jwt-service` — отдельный поддомен не нужен.
 
 ---
 
@@ -173,26 +224,6 @@ cd /root/matrix-docker-ansible-deploy
 
 bash tools/update.sh
 ```
-
----
-
-# DNS Setup
-
-Минимальные A-записи (все → IP сервера):
-
-```
-example.com
-matrix.example.com
-element.example.com
-```
-
-Опционально (с флагом `--with-ntfy`):
-
-```
-ntfy.example.com
-```
-
-LiveKit работает по path-маршрутизации через `matrix.example.com/livekit-jwt-service` - отдельный поддомен не нужен.
 
 ---
 
