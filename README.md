@@ -46,7 +46,8 @@ matrix-deploy-kit/
 │   ├── generate_vars.sh            # интерактивный генератор vars.yml
 │   ├── prepare_server.sh           # подготовка сервера (nginx/certbot/docker/ansible/just)
 │   ├── update.sh                   # обновление стека
-│   ├── backup.sh                   # бэкап
+│   ├── backup.sh                   # бэкап (pg_dumpall + конфиги)
+│   ├── restore.sh                  # восстановление из снимка backup.sh
 │   ├── nuke-user.sh                # полное удаление пользователя
 │   ├── tune-system.sh              # тюнинг ОС
 │   └── migrate-to-compose-v2.sh    # разовая миграция docker-compose v1 → v2

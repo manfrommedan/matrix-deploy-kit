@@ -40,9 +40,21 @@ fi
 [[ "$EUID" -eq 0 ]] || { err "Запуск от root"; exit 1; }
 command -v docker &>/dev/null || { err "Docker не установлен"; exit 1; }
 
+# Дампы содержат пароли ролей БД и signing.key — закрываем от чужих глаз
+umask 077
+
+# Не даём двум бэкапам идти параллельно (длинный дамп + cron-тик)
+if command -v flock &>/dev/null; then
+    exec 9>"/run/matrix-backup.lock" 2>/dev/null || exec 9>"/tmp/matrix-backup.lock"
+    flock -n 9 || { warn "Бэкап уже выполняется — выход"; exit 0; }
+fi
+
+CRITICAL_FAIL=0
+
 TS=$(date +%Y%m%d-%H%M%S)
 DEST="$BACKUP_DIR/$TS"
 mkdir -p "$DEST"
+chmod 700 "$BACKUP_DIR" "$DEST"
 log "Backup → $DEST"
 
 # --- 1) PostgreSQL: один контейнер, все БД и роли (pg_dumpall) ---
@@ -55,11 +67,13 @@ elif [[ ! -f "$PG_ENV" ]]; then
 else
     log "pg_dumpall ($PG_CONTAINER)"
     if docker exec --env-file="$PG_ENV" "$PG_CONTAINER" \
-        pg_dumpall -h "$PG_CONTAINER" | gzip -9 > "$DEST/pgdumpall.sql.gz"; then
-        log "  postgres: $(du -h "$DEST/pgdumpall.sql.gz" | cut -f1)"
+        pg_dumpall -h "$PG_CONTAINER" | gzip -9 > "$DEST/pgdumpall.sql.gz" \
+        && gzip -t "$DEST/pgdumpall.sql.gz" 2>/dev/null; then
+        log "  postgres: $(du -h "$DEST/pgdumpall.sql.gz" | cut -f1) (gzip ok)"
     else
-        err "  pg_dumpall failed"
+        err "  pg_dumpall failed или дамп повреждён"
         rm -f "$DEST/pgdumpall.sql.gz"
+        CRITICAL_FAIL=1
     fi
 fi
 
@@ -91,16 +105,27 @@ Host: $(hostname)
 Synapse: $(docker exec matrix-synapse python -c "import synapse; print(synapse.__version__)" 2>/dev/null || echo "?")
 Files:
 $(cd "$DEST" && ls -la | tail -n +2)
+
+Restore (postgres):
+  gunzip < pgdumpall.sql.gz | docker exec -i --env-file ${PG_ENV} ${PG_CONTAINER} psql -h ${PG_CONTAINER}
 EOF
 
 # --- 6) Ротация: последние RETENTION_DAYS снимков ---
 log "Rotate: оставляю последние $RETENTION_DAYS"
-ls -dt "$BACKUP_DIR"/2* 2>/dev/null | tail -n +$((RETENTION_DAYS + 1)) | while read -r old; do
-    log "  rm $old"
-    rm -rf "$old"
-done
+mapfile -t _snaps < <(ls -dt "$BACKUP_DIR"/2* 2>/dev/null || true)
+if (( ${#_snaps[@]} > RETENTION_DAYS )); then
+    for old in "${_snaps[@]:RETENTION_DAYS}"; do
+        log "  rm $old"
+        rm -rf "$old"
+    done
+fi
 
 log "Backup complete. Total: $(du -sh "$BACKUP_DIR" | cut -f1)"
 log "Off-site sync (рекомендуется):"
 log "  rsync -av $BACKUP_DIR/ remote:/path/"
 log "  rclone sync $BACKUP_DIR/ s3:bucket/"
+
+if (( CRITICAL_FAIL )); then
+    err "Бэкап завершён С ОШИБКОЙ (postgres dump провалился) — exit 1"
+    exit 1
+fi

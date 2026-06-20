@@ -242,6 +242,37 @@ bash tools/update.sh --sync-certs
 
 ---
 
+## Бэкап и восстановление
+
+Бэкап (`pg_dumpall` всех БД и ролей + конфиги Synapse/MAS с `signing.key`):
+
+```bash
+bash tools/backup.sh                  # разовый снимок в /root/backups/
+bash tools/backup.sh --install-cron   # ежедневно в 03:00
+```
+
+`/root/backups` намеренно вне тома `/matrix` — дамп переживёт порчу данных. Off-site
+(`rsync`/`rclone`) настрой сам. При провале дампа скрипт выходит с кодом 1 (для cron).
+
+Восстановление из снимка:
+
+```bash
+bash tools/restore.sh --latest            # последний снимок (только БД)
+bash tools/restore.sh --latest --config   # + конфиги Synapse/MAS (вкл. signing.key)
+bash tools/restore.sh --latest --clean    # чистая замена, если postgres уже с данными
+bash tools/restore.sh /root/backups/20260620-030000 --dry-run
+```
+
+Скрипт остановит сервисы, поднимет postgres, импортирует дамп в работающий
+`matrix-postgres` и поднимет всё обратно.
+
+- На **свежеразвёрнутый** сервер (БД ещё пустые) — обычный `restore.sh --latest`.
+- Если **postgres уже с данными** — без `--clean` дамп ляжет поверх (merge →
+  конфликты). `--clean` дропает целевые БД (имена берутся из дампа) перед заливкой,
+  давая чистую замену.
+
+---
+
 ## Удаление пользователя
 
 ```bash
@@ -288,7 +319,8 @@ docker exec matrix-postgres pg_dumpall -U matrix > /root/matrix-backup.sql
 │   ├── generate_vars.sh               # Генератор vars.yml
 │   ├── prepare_server.sh              # Подготовка сервера
 │   ├── update.sh                      # Обновление
-│   ├── backup.sh                      # Бэкап PostgreSQL
+│   ├── backup.sh                      # Бэкап (pg_dumpall + конфиги)
+│   ├── restore.sh                     # Восстановление из снимка
 │   ├── nuke-user.sh                   # Удаление пользователя
 │   ├── tune-system.sh                 # Тюнинг ОС
 │   └── migrate-to-compose-v2.sh       # Миграция docker-compose v1 → v2
