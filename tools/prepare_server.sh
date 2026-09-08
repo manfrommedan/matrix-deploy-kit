@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Matrix Server — скрипт первоначальной подготовки
+# Matrix Server - скрипт первоначальной подготовки
 # =============================================================================
 # Запуск на целевом сервере от root:
 #   curl -sL https://your-host/prepare_server.sh | bash -s -- --domain example.com
@@ -12,19 +12,27 @@
 
 set -euo pipefail
 
-# --- Цвета ---
+# --- Цвета (определяем ДО source _lib.sh, чтобы _lib мог переиспользовать) ---
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-log()  { echo -e "${GREEN}[+]${NC} $*"; }
-warn() { echo -e "${YELLOW}[!]${NC} $*" >&2; }
-err()  { echo -e "${RED}[x]${NC} $*" >&2; }
+# --- Общая библиотека (gen_dynamic_port и т.п.) ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tools/_lib.sh
+source "${SCRIPT_DIR}/_lib.sh"
+
+log() { echo -e "${GREEN}[+]${NC} $*"; }
+warn() { echo -e "${YELLOW}[!]${NC} $*"; }
+err() { echo -e "${RED}[x]${NC} $*" >&2; }
 info() { echo -e "${BLUE}[i]${NC} $*"; }
 
 # --- Значения по умолчанию ---
+# "Лучший режим" по умолчанию: nginx + landing + ntfy + случайные порты
+# + fail2ban. Firewall (ufw) опционален - у многих он уже на cloud security group.
+# Опт-аут через --without-* (см. help).
 DOMAIN=""
 DEPLOY_USER="matrix-admin"
 SSH_PORT=22
@@ -34,13 +42,13 @@ SKIP_SWAP=false
 SKIP_SSH_HARDENING=true
 SKIP_DOCKER=false
 SKIP_NGINX=false
-SKIP_FAIL2BAN=true
+SKIP_FAIL2BAN=false
 CERTBOT_EMAIL=""
 DRY_RUN=false
 KETESA_PORT=""
 ELEMENT_ADMIN_PORT=""
-WITH_LANDING_PAGE=false
-WITH_NTFY=false
+WITH_LANDING_PAGE=true
+WITH_NTFY=true
 DATA_PATH="/matrix"
 
 # Режим прокси: "nginx" (nginx → Traefik) или "traefik" (Traefik-only)
@@ -51,12 +59,13 @@ LK_RTC_TCP=""
 LK_RTC_UDP=""
 LK_TURN_TLS=""
 LK_TURN_UDP=""
+RANDOM_PORTS=true
 COTURN_STUN_PORT=""
 COTURN_TURNS_PORT=""
 COTURN_RELAY_RANGE=""
 FEDERATION_ON_443=false
 TLS13_ONLY=false
-MAX_UPLOAD_SIZE="100"  # MB, должно совпадать с matrix_synapse_max_upload_size_mb
+MAX_UPLOAD_SIZE="100" # MB, должно совпадать с matrix_synapse_max_upload_size_mb
 
 # --- Справка ---
 usage() {
@@ -67,6 +76,19 @@ usage() {
 Обязательные параметры:
   --domain DOMAIN           Домен Matrix-сервера (example.com)
 
+"Лучший режим" по умолчанию (recommended): nginx reverse proxy + certbot
+(SSL на :80/:443) + landing page на matrix.DOMAIN + ntfy push на ntfy.DOMAIN
++ случайные порты для LiveKit/TURN (49152-65535) + fail2ban.
+Firewall (ufw) опционален - у многих хостеров уже есть cloud security group.
+Для отказа от компонента используй --without-*:
+
+  --without-landing-page    Не создавать landing page и /tos
+  --without-ntfy            Не поднимать ntfy (push-уведомления отключены)
+  --without-fail2ban        Не ставить fail2ban
+  --without-ssh-hardening   Не закреплять sshd
+  --without-random-ports    Использовать стандартные порты LiveKit (7881/7882/5349/3478)
+  --with-firewall           Включить ufw (по умолчанию выключен - у большинства уже есть SG)
+
 Reverse proxy (выбрать один):
   (по умолчанию)            nginx → Traefik (nginx терминирует SSL, certbot)
   --traefik-only            Traefik-only (Traefik сам управляет SSL через ACME)
@@ -74,41 +96,42 @@ Reverse proxy (выбрать один):
 
 Опции (nginx режим):
   --email EMAIL             Email для certbot (по умолчанию admin@DOMAIN)
-  --ketesa-port PORT        Ketesa на скрытом порту (nginx → Traefik)
-  --element-admin-port PORT Element Admin на скрытом порту (nginx → Traefik)
-  --with-landing-page       Создать landing page и ToS на matrix.DOMAIN
-  --with-ntfy               Включить поддомен ntfy.DOMAIN (push-уведомления)
+  --ketesa-port PORT        Ketesa на скрытом порту (по умолчанию случайный 49152-65535)
+  --element-admin-port PORT Element Admin на скрытом порту (по умолчанию случайный)
 
-Порты для файрвола (--with-firewall):
-  --livekit-rtc-tcp PORT    LiveKit RTC TCP порт
-  --livekit-rtc-udp PORT    LiveKit RTC UDP порт
-  --livekit-turn-tls PORT   LiveKit TURN TLS порт
-  --livekit-turn-udp PORT   LiveKit TURN UDP порт
-  --coturn-stun PORT        Coturn STUN порт (по умолчанию: 3478)
-  --coturn-turns PORT       Coturn TURNS порт (по умолчанию: 5349)
-  --coturn-relay-range MIN:MAX  Coturn relay UDP диапазон (по умолчанию: 49152:49172)
-  --federation-on-443       Федерация на 443 (не открывать 8448, не генерировать nginx-блок)
-  --tls13-only              Принудительно TLS 1.3 (ssl_protocols TLSv1.3 во всех блоках)
+Порты для LiveKit/файрвола (порядок: ICE/TCP, ICE/UDP, TURN/TLS, TURN/UDP):
+  --livekit-rtc-tcp PORT    LiveKit RTC TCP (по умолчанию случайный)
+  --livekit-rtc-udp PORT    LiveKit RTC UDP (по умолчанию случайный)
+  --livekit-turn-tls PORT   LiveKit TURN TLS (по умолчанию случайный)
+  --livekit-turn-udp PORT   LiveKit TURN UDP (по умолчанию случайный)
+  --coturn-stun PORT        Coturn STUN (по умолчанию: 3478)
+  --coturn-turns PORT       Coturn TURNS (по умолчанию: 5349)
+  --coturn-relay-range MIN:MAX  Coturn relay UDP (по умолчанию: 49152:49172)
+  --federation-on-443       Федерация на 443 (не открывать 8448)
+  --tls13-only              Принудительно TLS 1.3 во всех блоках
   --max-upload SIZE_MB      Макс. размер загрузки в МБ (по умолчанию: 100, должно совпадать с Synapse)
 
 Общие опции:
   --deploy-user USER        Имя deploy-пользователя (по умолчанию: matrix-admin)
   --ssh-port PORT           Порт SSH (по умолчанию: 22)
-  --swap-size SIZE          Размер swap (по умолчанию: 2G, 0 — не создавать)
+  --swap-size SIZE          Размер swap (по умолчанию: 2G, 0 - не создавать)
   --skip-swap               Не создавать swap
   --skip-docker             Не ставить Docker (плейбук поставит сам)
-  --with-firewall           Настроить ufw (по умолчанию выключен)
-  --with-ssh-hardening      Закрепить настройки SSH (по умолчанию выключен)
-  --with-fail2ban           Установить fail2ban (по умолчанию выключен)
   --data-path PATH          Путь к данным Matrix (по умолчанию: /matrix)
   --dry-run                 Показать что будет сделано, без выполнения
   -h, --help                Показать справку
 
 Примеры:
-  # nginx режим (с admin-панелями на портах):
-  prepare_server.sh --domain example.com --ketesa-port 35805 --with-landing-page
+  # "Лучший режим" (всё включено, рандомные порты):
+  prepare_server.sh --domain example.com --email admin@example.com
 
-  # Traefik-only (SSL через Traefik ACME):
+  # Без ntfy (если push не нужен):
+  prepare_server.sh --domain example.com --without-ntfy
+
+  # Без файрвола (порты откроешь у облака):
+  prepare_server.sh --domain example.com --without-firewall
+
+  # Traefik-only (без nginx, SSL через Traefik ACME):
   prepare_server.sh --domain example.com --traefik-only
 USAGE
     exit 0
@@ -117,35 +140,148 @@ USAGE
 # --- Парсинг аргументов ---
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --domain)           DOMAIN="$2"; shift 2 ;;
-        --email)            CERTBOT_EMAIL="$2"; shift 2 ;;
-        --deploy-user)      DEPLOY_USER="$2"; shift 2 ;;
-        --ssh-port)         SSH_PORT="$2"; shift 2 ;;
-        --swap-size)        SWAP_SIZE="$2"; shift 2 ;;
-        --skip-swap)        SKIP_SWAP=true; shift ;;
-        --skip-docker)      SKIP_DOCKER=true; shift ;;
-        --skip-nginx|--traefik-only) SKIP_NGINX=true; PROXY_MODE="traefik"; shift ;;
-        --with-firewall)    SKIP_FIREWALL=false; shift ;;
-        --with-ssh-hardening) SKIP_SSH_HARDENING=false; shift ;;
-        --with-fail2ban)    SKIP_FAIL2BAN=false; shift ;;
-        --ketesa-port) KETESA_PORT="$2"; shift 2 ;;
-        --element-admin-port) ELEMENT_ADMIN_PORT="$2"; shift 2 ;;
-        --with-landing-page)  WITH_LANDING_PAGE=true; shift ;;
-        --with-ntfy)          WITH_NTFY=true; shift ;;
-        --data-path)        DATA_PATH="$2"; shift 2 ;;
-        --livekit-rtc-tcp)    LK_RTC_TCP="$2"; shift 2 ;;
-        --livekit-rtc-udp)    LK_RTC_UDP="$2"; shift 2 ;;
-        --livekit-turn-tls)   LK_TURN_TLS="$2"; shift 2 ;;
-        --livekit-turn-udp)   LK_TURN_UDP="$2"; shift 2 ;;
-        --coturn-stun)        COTURN_STUN_PORT="$2"; shift 2 ;;
-        --coturn-turns)       COTURN_TURNS_PORT="$2"; shift 2 ;;
-        --coturn-relay-range) COTURN_RELAY_RANGE="$2"; shift 2 ;;
-        --federation-on-443)  FEDERATION_ON_443=true; shift ;;
-        --tls13-only)         TLS13_ONLY=true; shift ;;
-        --max-upload)         MAX_UPLOAD_SIZE="$2"; shift 2 ;;
-        --dry-run)          DRY_RUN=true; shift ;;
-        -h|--help)          usage ;;
-        *)                  err "Неизвестный параметр: $1"; usage ;;
+        --domain)
+            DOMAIN="$2"
+            shift 2
+            ;;
+        --email)
+            CERTBOT_EMAIL="$2"
+            shift 2
+            ;;
+        --deploy-user)
+            DEPLOY_USER="$2"
+            shift 2
+            ;;
+        --ssh-port)
+            SSH_PORT="$2"
+            shift 2
+            ;;
+        --swap-size)
+            SWAP_SIZE="$2"
+            shift 2
+            ;;
+        --skip-swap)
+            SKIP_SWAP=true
+            shift
+            ;;
+        --skip-docker)
+            SKIP_DOCKER=true
+            shift
+            ;;
+        --skip-nginx | --traefik-only)
+            SKIP_NGINX=true
+            PROXY_MODE="traefik"
+            shift
+            ;;
+        --with-firewall)
+            SKIP_FIREWALL=false
+            shift
+            ;;
+        --with-ssh-hardening)
+            SKIP_SSH_HARDENING=false
+            shift
+            ;;
+        --with-fail2ban)
+            SKIP_FAIL2BAN=false
+            shift
+            ;;
+        --without-firewall)
+            SKIP_FIREWALL=true
+            shift
+            ;;
+        --without-ssh-hardening)
+            SKIP_SSH_HARDENING=true
+            shift
+            ;;
+        --without-fail2ban)
+            SKIP_FAIL2BAN=true
+            shift
+            ;;
+        --without-random-ports)
+            RANDOM_PORTS=false
+            shift
+            ;;
+        --ketesa-port)
+            KETESA_PORT="$2"
+            shift 2
+            ;;
+        --element-admin-port)
+            ELEMENT_ADMIN_PORT="$2"
+            shift 2
+            ;;
+        --with-landing-page)
+            WITH_LANDING_PAGE=true
+            shift
+            ;;
+        --with-ntfy)
+            WITH_NTFY=true
+            shift
+            ;;
+        --without-landing-page)
+            WITH_LANDING_PAGE=false
+            shift
+            ;;
+        --without-ntfy)
+            WITH_NTFY=false
+            shift
+            ;;
+        --data-path)
+            DATA_PATH="$2"
+            shift 2
+            ;;
+        --livekit-rtc-tcp)
+            LK_RTC_TCP="$2"
+            shift 2
+            ;;
+        --livekit-rtc-udp)
+            LK_RTC_UDP="$2"
+            shift 2
+            ;;
+        --livekit-turn-tls)
+            LK_TURN_TLS="$2"
+            shift 2
+            ;;
+        --livekit-turn-udp)
+            LK_TURN_UDP="$2"
+            shift 2
+            ;;
+        --random-ports)
+            RANDOM_PORTS=true
+            shift
+            ;;
+        --coturn-stun)
+            COTURN_STUN_PORT="$2"
+            shift 2
+            ;;
+        --coturn-turns)
+            COTURN_TURNS_PORT="$2"
+            shift 2
+            ;;
+        --coturn-relay-range)
+            COTURN_RELAY_RANGE="$2"
+            shift 2
+            ;;
+        --federation-on-443)
+            FEDERATION_ON_443=true
+            shift
+            ;;
+        --tls13-only)
+            TLS13_ONLY=true
+            shift
+            ;;
+        --max-upload)
+            MAX_UPLOAD_SIZE="$2"
+            shift 2
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        -h | --help) usage ;;
+        *)
+            err "Неизвестный параметр: $1"
+            usage
+            ;;
     esac
 done
 
@@ -193,6 +329,47 @@ if [[ -z "$CERTBOT_EMAIL" ]]; then
     CERTBOT_EMAIL="admin@${DOMAIN}"
 fi
 
+# --- Генерация случайных портов (--random-ports) ---
+if [[ "$RANDOM_PORTS" == true ]]; then
+    used_ports=""
+    declare -A _rp=()
+    # LiveKit
+    for var in LK_RTC_TCP LK_RTC_UDP LK_TURN_TLS LK_TURN_UDP; do
+        if [[ -z "${!var}" ]]; then
+            port=$(gen_dynamic_port "" "" "$used_ports") || {
+                err "Не удалось сгенерировать уникальный ${var} (диапазон слишком узкий?)"
+                exit 1
+            }
+            printf -v "$var" '%s' "$port"
+            used_ports+=" $port"
+        else
+            used_ports+=" ${!var}"
+        fi
+    done
+    # Ketesa / Element Admin (только в nginx-режиме)
+    if [[ "$PROXY_MODE" == "nginx" ]]; then
+        for var in KETESA_PORT ELEMENT_ADMIN_PORT; do
+            if [[ -z "${!var}" ]]; then
+                port=$(gen_dynamic_port "" "" "$used_ports") || {
+                    err "Не удалось сгенерировать уникальный ${var}"
+                    exit 1
+                }
+                printf -v "$var" '%s' "$port"
+                used_ports+=" $port"
+            else
+                used_ports+=" ${!var}"
+            fi
+        done
+    fi
+    info "Сгенерированы порты (--random-ports):"
+    info "  LiveKit:   ICE/TCP=${LK_RTC_TCP}  ICE/UDP=${LK_RTC_UDP}  TURN/TLS=${LK_TURN_TLS}  TURN/UDP=${LK_TURN_UDP}"
+    if [[ "$PROXY_MODE" == "nginx" ]]; then
+        info "  Ketesa:    ${KETESA_PORT:-<skip>}"
+        info "  Elem Adm:  ${ELEMENT_ADMIN_PORT:-<skip>}"
+    fi
+    info "Пропиши эти же порты в vars.yml (generate_vars.sh --random-ports) или вручную."
+fi
+
 # Проверка ОС
 if ! command -v apt-get &>/dev/null; then
     err "Поддерживаются только apt-based дистрибутивы (Ubuntu/Debian)"
@@ -222,15 +399,17 @@ else
 fi
 
 if [[ "$DRY_RUN" == true ]]; then
-    warn "DRY RUN — ничего не будет выполнено"
+    warn "DRY RUN - ничего не будет выполнено"
     exit 0
 fi
 
 echo ""
 read -rp "Продолжить? [y/N] " confirm
-[[ "$confirm" =~ ^[Yy]$ ]] || { info "Отменено."; exit 0; }
+[[ "$confirm" =~ ^[Yy]$ ]] || {
+    info "Отменено."
+    exit 0
+}
 echo ""
-
 
 # =============================================================================
 # 1. Обновление системы
@@ -243,7 +422,7 @@ export LC_ALL="${LC_ALL:-C.UTF-8}" LANG="${LANG:-C.UTF-8}"
 apt-get update -qq
 apt-get upgrade -y -qq
 # Только то, что используют скрипты (curl/jq/pwgen/gnupg) + базовая диагностика.
-# apt-transport-https встроен в apt (Debian 10+/Ubuntu 18.04+); lsb-release не нужен —
+# apt-transport-https встроен в apt (Debian 10+/Ubuntu 18.04+); lsb-release не нужен -
 # ОС определяется через /etc/os-release.
 apt-get install -y -qq \
     ca-certificates \
@@ -258,7 +437,6 @@ apt-get install -y -qq \
 
 log "Система обновлена"
 
-
 # =============================================================================
 # 2. Deploy-пользователь
 # =============================================================================
@@ -270,7 +448,7 @@ else
     useradd -m -s /bin/bash -G sudo "${DEPLOY_USER}"
 
     # Sudo без пароля для deploy-пользователя
-    cat > "/etc/sudoers.d/${DEPLOY_USER}" <<EOF
+    cat >"/etc/sudoers.d/${DEPLOY_USER}" <<EOF
 ${DEPLOY_USER} ALL=(ALL) NOPASSWD:ALL
 EOF
     chmod 440 "/etc/sudoers.d/${DEPLOY_USER}"
@@ -286,7 +464,6 @@ EOF
 
     log "Пользователь ${DEPLOY_USER} создан"
 fi
-
 
 # =============================================================================
 # 3. SSH Hardening
@@ -305,18 +482,18 @@ if [[ "$SKIP_SSH_HARDENING" == false ]]; then
         if grep -qE "^\s*#?\s*${key}\b" "$SSHD_CONFIG"; then
             sed -i "s/^\s*#\?\s*${key}\b.*/${key} ${value}/" "$SSHD_CONFIG"
         else
-            echo "${key} ${value}" >> "$SSHD_CONFIG"
+            echo "${key} ${value}" >>"$SSHD_CONFIG"
         fi
     }
 
-    set_sshd_param "Port"                  "$SSH_PORT"
-    set_sshd_param "PermitRootLogin"       "prohibit-password"
+    set_sshd_param "Port" "$SSH_PORT"
+    set_sshd_param "PermitRootLogin" "prohibit-password"
     set_sshd_param "PasswordAuthentication" "no"
-    set_sshd_param "PubkeyAuthentication"  "yes"
-    set_sshd_param "X11Forwarding"         "no"
-    set_sshd_param "MaxAuthTries"          "3"
-    set_sshd_param "ClientAliveInterval"   "300"
-    set_sshd_param "ClientAliveCountMax"   "2"
+    set_sshd_param "PubkeyAuthentication" "yes"
+    set_sshd_param "X11Forwarding" "no"
+    set_sshd_param "MaxAuthTries" "3"
+    set_sshd_param "ClientAliveInterval" "300"
+    set_sshd_param "ClientAliveCountMax" "2"
 
     # Валидация конфига перед перезапуском
     if sshd -t -f "$SSHD_CONFIG" 2>/dev/null; then
@@ -330,7 +507,6 @@ if [[ "$SKIP_SSH_HARDENING" == false ]]; then
 else
     info "SSH hardening пропущен (включить: --with-ssh-hardening)"
 fi
-
 
 # =============================================================================
 # 4. Firewall (ufw)
@@ -359,7 +535,7 @@ if [[ "$SKIP_FIREWALL" == false ]]; then
         ufw allow 8448/tcp comment "Matrix Federation"
     fi
 
-    # TURN/STUN (Coturn) — кастомные порты если указаны, иначе дефолтные
+    # TURN/STUN (Coturn) - кастомные порты если указаны, иначе дефолтные
     ufw allow "${COTURN_STUN_PORT:-3478}/tcp" comment "STUN/TURN TCP"
     ufw allow "${COTURN_STUN_PORT:-3478}/udp" comment "STUN/TURN UDP"
     ufw allow "${COTURN_TURNS_PORT:-5349}/tcp" comment "TURNS TCP"
@@ -385,7 +561,6 @@ else
     info "Файрвол пропущен (включить: --with-firewall)"
 fi
 
-
 # =============================================================================
 # 5. Swap
 # =============================================================================
@@ -402,7 +577,7 @@ if [[ "$SKIP_SWAP" == false && "$SWAP_SIZE" != "0" ]]; then
 
         # Добавляем в fstab если ещё нет
         if ! grep -q "/swapfile" /etc/fstab; then
-            echo "/swapfile none swap sw 0 0" >> /etc/fstab
+            echo "/swapfile none swap sw 0 0" >>/etc/fstab
         fi
 
         # Оптимальные параметры для сервера
@@ -410,7 +585,7 @@ if [[ "$SKIP_SWAP" == false && "$SWAP_SIZE" != "0" ]]; then
         sysctl -w vm.vfs_cache_pressure=50 >/dev/null
 
         if ! grep -q "vm.swappiness" /etc/sysctl.d/99-matrix.conf 2>/dev/null; then
-            cat > /etc/sysctl.d/99-matrix.conf <<'EOF'
+            cat >/etc/sysctl.d/99-matrix.conf <<'EOF'
 vm.swappiness=10
 vm.vfs_cache_pressure=50
 EOF
@@ -421,7 +596,6 @@ EOF
 else
     info "Swap пропущен"
 fi
-
 
 # =============================================================================
 # 6. Docker
@@ -455,7 +629,7 @@ if [[ "$SKIP_DOCKER" == false ]]; then
 
     # Остановить контейнеры от предыдущего деплоя (restart policy поднимет их при старте демона)
     if docker ps -q --filter name=matrix- 2>/dev/null | grep -q .; then
-        warn "Обнаружены контейнеры от предыдущего деплоя — останавливаю..."
+        warn "Обнаружены контейнеры от предыдущего деплоя - останавливаю..."
         docker ps -q --filter name=matrix- | xargs -r docker stop 2>/dev/null || true
         log "Старые контейнеры остановлены"
     fi
@@ -466,7 +640,6 @@ if [[ "$SKIP_DOCKER" == false ]]; then
 else
     info "Docker пропущен (--skip-docker, плейбук поставит сам)"
 fi
-
 
 # =============================================================================
 # 6a. Ansible
@@ -481,7 +654,6 @@ else
     log "Ansible установлен: $(ansible --version 2>/dev/null | head -1)"
 fi
 
-
 # =============================================================================
 # 6b. just (command runner)
 # =============================================================================
@@ -492,7 +664,7 @@ if command -v just &>/dev/null; then
 else
     log "Установка just..."
     apt-get install -y -qq just 2>/dev/null || {
-        # Если нет в репозиториях — ставим через prebuilt binary
+        # Если нет в репозиториях - ставим через prebuilt binary
         JUST_VERSION=$(curl -fsSL https://api.github.com/repos/casey/just/releases/latest | jq -r .tag_name)
         curl -fsSL "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz" | tar xz -C /usr/local/bin just
         chmod +x /usr/local/bin/just
@@ -500,221 +672,229 @@ else
     log "just установлен: $(just --version)"
 fi
 
-
 if [[ "$SKIP_NGINX" == false ]]; then
 
-# =============================================================================
-# 7. nginx
-# =============================================================================
-log "Установка nginx..."
+    # =============================================================================
+    # 7. nginx
+    # =============================================================================
+    log "Установка nginx..."
 
-if command -v nginx &>/dev/null; then
-    warn "nginx уже установлен: $(nginx -v 2>&1)"
-else
-    apt-get install -y -qq nginx
-    systemctl enable nginx
-    log "nginx установлен: $(nginx -v 2>&1)"
-fi
-
-# Создаём директорию для certbot webroot
-mkdir -p /var/www/certbot
-
-# Удаляем дефолтный конфиг
-rm -f /etc/nginx/sites-enabled/default
-
-
-# =============================================================================
-# 8. Certbot
-# =============================================================================
-log "Установка certbot..."
-
-if command -v certbot &>/dev/null; then
-    warn "certbot уже установлен: $(certbot --version 2>&1)"
-else
-    apt-get install -y -qq certbot python3-certbot-nginx
-    log "certbot установлен: $(certbot --version 2>&1)"
-fi
-
-# Файлы SSL-конфигурации nginx (certbot не всегда их создаёт)
-mkdir -p /etc/letsencrypt
-if [[ ! -f /etc/letsencrypt/options-ssl-nginx.conf ]]; then
-    curl -fsSL https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf \
-        -o /etc/letsencrypt/options-ssl-nginx.conf
-    log "options-ssl-nginx.conf скачан"
-fi
-if [[ ! -f /etc/letsencrypt/ssl-dhparams.pem ]]; then
-    curl -fsSL https://raw.githubusercontent.com/certbot/certbot/master/certbot/certbot/ssl-dhparams.pem \
-        -o /etc/letsencrypt/ssl-dhparams.pem
-    log "ssl-dhparams.pem скачан"
-fi
-
-
-# =============================================================================
-# 9. Получение SSL-сертификатов
-# =============================================================================
-log "Получение SSL-сертификатов..."
-
-# Формируем список доменов для сертификата
-CERT_DOMAINS=("${DOMAIN}" "matrix.${DOMAIN}" "element.${DOMAIN}")
-[[ "$WITH_NTFY" == true ]] && CERT_DOMAINS+=("ntfy.${DOMAIN}")
-
-# --- Проверка DNS перед запросом сертификата ---
-MY_IP=$(curl -s --max-time 5 ifconfig.me || echo "")
-
-info "Проверка DNS записей (должны указывать на ${MY_IP:-<этот сервер>}):"
-echo ""
-
-DNS_OK=true
-for d in "${CERT_DOMAINS[@]}"; do
-    RESOLVED_IP=$(dig +short "$d" A 2>/dev/null | tail -1)
-    if [[ -z "$RESOLVED_IP" ]]; then
-        echo -e "    ${RED}✗${NC} ${d} — ${RED}не резолвится${NC}"
-        DNS_OK=false
-    elif [[ -n "$MY_IP" && "$RESOLVED_IP" != "$MY_IP" ]]; then
-        echo -e "    ${YELLOW}!${NC} ${d} → ${RESOLVED_IP} (ожидается ${MY_IP})"
-        DNS_OK=false
+    if command -v nginx &>/dev/null; then
+        warn "nginx уже установлен: $(nginx -v 2>&1)"
     else
-        echo -e "    ${GREEN}✓${NC} ${d} → ${RESOLVED_IP}"
+        apt-get install -y -qq nginx
+        systemctl enable nginx
+        log "nginx установлен: $(nginx -v 2>&1)"
     fi
-done
-echo ""
 
-if [[ "$DNS_OK" == false ]]; then
-    warn "Некоторые DNS записи не настроены или указывают на другой IP!"
-    warn "Certbot не сможет получить сертификат без корректных DNS записей."
+    # Создаём директорию для certbot webroot
+    mkdir -p /var/www/certbot
+
+    # Удаляем дефолтный конфиг
+    rm -f /etc/nginx/sites-enabled/default
+
+    # Включаем server_tokens off глобально в nginx.conf (http {}),
+    # чтобы не дублировать директиву в site-конфигах (где она уже была).
+    # Это скрывает версию nginx из Server-баннера и из error-страниц.
+    if [[ -f /etc/nginx/nginx.conf ]] && grep -qE '^\s*#\s*server_tokens\s+off' /etc/nginx/nginx.conf; then
+        sed -i 's/^\(\s*\)#\s*server_tokens off;/\1server_tokens off;/' /etc/nginx/nginx.conf
+        log "server_tokens off - раскомментирован в /etc/nginx/nginx.conf"
+    fi
+
+    # =============================================================================
+    # 8. Certbot
+    # =============================================================================
+    log "Установка certbot..."
+
+    if command -v certbot &>/dev/null; then
+        warn "certbot уже установлен: $(certbot --version 2>&1)"
+    else
+        apt-get install -y -qq certbot python3-certbot-nginx
+        log "certbot установлен: $(certbot --version 2>&1)"
+    fi
+
+    # Файлы SSL-конфигурации nginx (certbot не всегда их создаёт)
+    mkdir -p /etc/letsencrypt
+    if [[ ! -f /etc/letsencrypt/options-ssl-nginx.conf ]]; then
+        curl -fsSL https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf \
+            -o /etc/letsencrypt/options-ssl-nginx.conf
+        log "options-ssl-nginx.conf скачан"
+    fi
+    if [[ ! -f /etc/letsencrypt/ssl-dhparams.pem ]]; then
+        curl -fsSL https://raw.githubusercontent.com/certbot/certbot/master/certbot/certbot/ssl-dhparams.pem \
+            -o /etc/letsencrypt/ssl-dhparams.pem
+        log "ssl-dhparams.pem скачан"
+    fi
+
+    # =============================================================================
+    # 9. Получение SSL-сертификатов
+    # =============================================================================
+    log "Получение SSL-сертификатов..."
+
+    # Формируем список доменов для сертификата
+    CERT_DOMAINS=("${DOMAIN}" "matrix.${DOMAIN}" "element.${DOMAIN}")
+    [[ "$WITH_NTFY" == true ]] && CERT_DOMAINS+=("ntfy.${DOMAIN}")
+
+    # --- Проверка DNS перед запросом сертификата ---
+    MY_IP=$(curl -s --max-time 5 ifconfig.me || echo "")
+
+    info "Проверка DNS записей (должны указывать на ${MY_IP:-<этот сервер>}):"
     echo ""
-    echo -e "  Необходимые A-записи (все → ${MY_IP:-<IP сервера>}):"
+
+    DNS_OK=true
     for d in "${CERT_DOMAINS[@]}"; do
-        echo -e "    A  ${d}  →  ${MY_IP:-<IP>}"
+        RESOLVED_IP=$(dig +short "$d" A 2>/dev/null | tail -1)
+        if [[ -z "$RESOLVED_IP" ]]; then
+            echo -e "    ${RED}✗${NC} ${d} - ${RED}не резолвится${NC}"
+            DNS_OK=false
+        elif [[ -n "$MY_IP" && "$RESOLVED_IP" != "$MY_IP" ]]; then
+            echo -e "    ${YELLOW}!${NC} ${d} → ${RESOLVED_IP} (ожидается ${MY_IP})"
+            DNS_OK=false
+        else
+            echo -e "    ${GREEN}✓${NC} ${d} → ${RESOLVED_IP}"
+        fi
     done
     echo ""
-    read -rp "  Продолжить попытку получения сертификата? [y/N] " dns_continue
-    if [[ ! "$dns_continue" =~ ^[Yy] ]]; then
-        warn "Пропускаем получение сертификата."
-        warn "После настройки DNS запусти вручную:"
-        _certbot_cmd="certbot certonly --standalone"
+
+    if [[ "$DNS_OK" == false ]]; then
+        warn "Некоторые DNS записи не настроены или указывают на другой IP!"
+        warn "Certbot не сможет получить сертификат без корректных DNS записей."
+        echo ""
+        echo -e "  Необходимые A-записи (все → ${MY_IP:-<IP сервера>}):"
         for d in "${CERT_DOMAINS[@]}"; do
-            _certbot_cmd="${_certbot_cmd} -d ${d}"
+            echo -e "    A  ${d}  →  ${MY_IP:-<IP>}"
         done
-        warn "  ${_certbot_cmd}"
-        # Продолжаем с настройкой nginx (без сертификата — nginx не запустится)
-        CERT_PATH=""
+        echo ""
+        read -rp "  Продолжить попытку получения сертификата? [y/N] " dns_continue
+        if [[ ! "$dns_continue" =~ ^[Yy] ]]; then
+            warn "Пропускаем получение сертификата."
+            warn "После настройки DNS запусти вручную:"
+            _certbot_cmd="certbot certonly --standalone"
+            for d in "${CERT_DOMAINS[@]}"; do
+                _certbot_cmd="${_certbot_cmd} -d ${d}"
+            done
+            warn "  ${_certbot_cmd}"
+            # Продолжаем с настройкой nginx (без сертификата - nginx не запустится)
+            CERT_PATH=""
+        fi
     fi
-fi
 
-# --- Запрос сертификата ---
-CERT_PATH="${CERT_PATH:-/etc/letsencrypt/live/${DOMAIN}/fullchain.pem}"
+    # --- Запрос сертификата ---
+    CERT_PATH="${CERT_PATH:-/etc/letsencrypt/live/${DOMAIN}/fullchain.pem}"
 
-if [[ -n "$CERT_PATH" && -f "$CERT_PATH" ]]; then
-    # Сертификат уже есть - проверим что в SAN все нужные сабдомены (ntfy и т.д.)
-    _existing_san=$(openssl x509 -in "$CERT_PATH" -text -noout 2>/dev/null \
-        | grep -oP 'DNS:\K[^,[:space:]]+' | sort -u)
-    _missing=()
-    for d in "${CERT_DOMAINS[@]}"; do
-        echo "$_existing_san" | grep -qFx "$d" || _missing+=("$d")
-    done
-    if (( ${#_missing[@]} == 0 )); then
-        warn "Сертификат для ${DOMAIN} уже существует и покрывает все сабдомены"
-    else
-        log "Сертификат существует, но не покрывает: ${_missing[*]} - расширяем"
+    if [[ -n "$CERT_PATH" && -f "$CERT_PATH" ]]; then
+        # Сертификат уже есть - проверим что в SAN все нужные сабдомены (ntfy и т.д.)
+        _existing_san=$(openssl x509 -in "$CERT_PATH" -text -noout 2>/dev/null |
+            grep -oP 'DNS:\K[^,[:space:]]+' | sort -u)
+        _missing=()
+        for d in "${CERT_DOMAINS[@]}"; do
+            echo "$_existing_san" | grep -qFx "$d" || _missing+=("$d")
+        done
+        if ((${#_missing[@]} == 0)); then
+            warn "Сертификат для ${DOMAIN} уже существует и покрывает все сабдомены"
+        else
+            log "Сертификат существует, но не покрывает: ${_missing[*]} - расширяем"
+            systemctl stop nginx 2>/dev/null || true
+            CERTBOT_DOMAIN_ARGS=()
+            for d in "${CERT_DOMAINS[@]}"; do
+                CERTBOT_DOMAIN_ARGS+=(-d "$d")
+            done
+            if certbot certonly --standalone --non-interactive --agree-tos --expand \
+                --email "${CERTBOT_EMAIL}" \
+                "${CERTBOT_DOMAIN_ARGS[@]}"; then
+                log "Сертификат расширен"
+            else
+                err "Не удалось расширить сертификат. Проверь DNS и попробуй вручную:"
+                _certbot_cmd="certbot certonly --standalone --expand"
+                for d in "${CERT_DOMAINS[@]}"; do
+                    _certbot_cmd="${_certbot_cmd} -d ${d}"
+                done
+                err "  ${_certbot_cmd}"
+            fi
+        fi
+    elif [[ -n "$CERT_PATH" ]]; then
+        # Останавливаем nginx чтобы certbot мог использовать порт 80 (standalone)
         systemctl stop nginx 2>/dev/null || true
+
+        # Собираем аргументы -d для certbot
         CERTBOT_DOMAIN_ARGS=()
         for d in "${CERT_DOMAINS[@]}"; do
             CERTBOT_DOMAIN_ARGS+=(-d "$d")
         done
-        if certbot certonly --standalone --non-interactive --agree-tos --expand \
+
+        if certbot certonly --standalone --non-interactive --agree-tos \
             --email "${CERTBOT_EMAIL}" \
             "${CERTBOT_DOMAIN_ARGS[@]}"; then
-            log "Сертификат расширен"
+            log "Сертификаты получены"
+            # Переключаем renewal на webroot (standalone не работает пока nginx запущен)
+            _renewal_conf="/etc/letsencrypt/renewal/${DOMAIN}.conf"
+            if [[ -f "$_renewal_conf" ]]; then
+                sed -i 's/^authenticator = standalone$/authenticator = webroot/' "$_renewal_conf"
+                if ! grep -q '^\[\[webroot\]\]' "$_renewal_conf"; then
+                    {
+                        echo "[[webroot]]"
+                        for d in "${CERT_DOMAINS[@]}"; do
+                            echo "${d} = /var/www/certbot"
+                        done
+                    } >>"$_renewal_conf"
+                fi
+                log "Certbot renewal переключен на webroot"
+            fi
         else
-            err "Не удалось расширить сертификат. Проверь DNS и попробуй вручную:"
-            _certbot_cmd="certbot certonly --standalone --expand"
+            err "Не удалось получить сертификаты."
+            err "После настройки DNS запусти вручную:"
+            _certbot_cmd="certbot certonly --standalone"
             for d in "${CERT_DOMAINS[@]}"; do
                 _certbot_cmd="${_certbot_cmd} -d ${d}"
             done
             err "  ${_certbot_cmd}"
         fi
     fi
-elif [[ -n "$CERT_PATH" ]]; then
-    # Останавливаем nginx чтобы certbot мог использовать порт 80 (standalone)
-    systemctl stop nginx 2>/dev/null || true
 
-    # Собираем аргументы -d для certbot
-    CERTBOT_DOMAIN_ARGS=()
-    for d in "${CERT_DOMAINS[@]}"; do
-        CERTBOT_DOMAIN_ARGS+=(-d "$d")
-    done
-
-    if certbot certonly --standalone --non-interactive --agree-tos \
-        --email "${CERTBOT_EMAIL}" \
-        "${CERTBOT_DOMAIN_ARGS[@]}"; then
-        log "Сертификаты получены"
-        # Переключаем renewal на webroot (standalone не работает пока nginx запущен)
-        _renewal_conf="/etc/letsencrypt/renewal/${DOMAIN}.conf"
-        if [[ -f "$_renewal_conf" ]]; then
-            sed -i 's/^authenticator = standalone$/authenticator = webroot/' "$_renewal_conf"
-            if ! grep -q '^\[\[webroot\]\]' "$_renewal_conf"; then
-                {
-                    echo "[[webroot]]"
-                    for d in "${CERT_DOMAINS[@]}"; do
-                        echo "${d} = /var/www/certbot"
-                    done
-                } >> "$_renewal_conf"
-            fi
-            log "Certbot renewal переключен на webroot"
-        fi
+    # Автопродление (таймер certbot обычно ставится с пакетом, проверяем)
+    if systemctl list-timers | grep -q certbot; then
+        info "Автопродление сертификатов: активно (certbot.timer)"
     else
-        err "Не удалось получить сертификаты."
-        err "После настройки DNS запусти вручную:"
-        _certbot_cmd="certbot certonly --standalone"
-        for d in "${CERT_DOMAINS[@]}"; do
-            _certbot_cmd="${_certbot_cmd} -d ${d}"
-        done
-        err "  ${_certbot_cmd}"
-    fi
-fi
-
-# Автопродление (таймер certbot обычно ставится с пакетом, проверяем)
-if systemctl list-timers | grep -q certbot; then
-    info "Автопродление сертификатов: активно (certbot.timer)"
-else
-    # Добавляем cron как fallback
-    if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
-        (crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet --post-hook 'systemctl reload nginx'") | crontab -
-        info "Автопродление: добавлено в cron (03:00 ежедневно)"
-    fi
-fi
-
-# Серты для LiveKit и Coturn (nginx+Traefik: Traefik без ACME → нужны свои серты)
-if [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
-    # Определяем UID/GID пользователя matrix (может отличаться на разных системах)
-    _matrix_uid=$(id -u matrix 2>/dev/null || echo 0)
-    _matrix_gid=$(id -g matrix 2>/dev/null || echo 0)
-    if [[ "$_matrix_uid" == "0" ]]; then
-        warn "Пользователь matrix ещё не создан — серты будут root:root (Ansible исправит владельца)"
+        # Добавляем cron как fallback
+        if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
+            (
+                crontab -l 2>/dev/null
+                echo "0 3 * * * certbot renew --quiet --post-hook 'systemctl reload nginx'"
+            ) | crontab -
+            info "Автопродление: добавлено в cron (03:00 ежедневно)"
+        fi
     fi
 
-    # LiveKit
-    _lk_cert_dir="${DATA_PATH}/livekit-server/certs"
-    mkdir -p "$_lk_cert_dir"
-    cp -L "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "${_lk_cert_dir}/fullchain.pem"
-    cp -L "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" "${_lk_cert_dir}/privkey.pem"
-    chown "${_matrix_uid}:${_matrix_gid}" "${_lk_cert_dir}"/*.pem 2>/dev/null || true
-    chmod 640 "${_lk_cert_dir}"/*.pem
-    log "LiveKit серты: скопированы в ${_lk_cert_dir}/"
+    # Серты для LiveKit и Coturn (nginx+Traefik: Traefik без ACME → нужны свои серты)
+    if [[ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
+        # Определяем UID/GID пользователя matrix (может отличаться на разных системах)
+        _matrix_uid=$(id -u matrix 2>/dev/null || echo 0)
+        _matrix_gid=$(id -g matrix 2>/dev/null || echo 0)
+        if [[ "$_matrix_uid" == "0" ]]; then
+            warn "Пользователь matrix ещё не создан - серты будут root:root (Ansible исправит владельца)"
+        fi
 
-    # Coturn
-    _ct_cert_dir="${DATA_PATH}/coturn/certs"
-    mkdir -p "$_ct_cert_dir"
-    cp -L "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "${_ct_cert_dir}/fullchain.pem"
-    cp -L "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" "${_ct_cert_dir}/privkey.pem"
-    chown "${_matrix_uid}:${_matrix_gid}" "${_ct_cert_dir}"/*.pem 2>/dev/null || true
-    chmod 640 "${_ct_cert_dir}"/*.pem
-    log "Coturn серты: скопированы в ${_ct_cert_dir}/"
+        # LiveKit
+        _lk_cert_dir="${DATA_PATH}/livekit-server/certs"
+        mkdir -p "$_lk_cert_dir"
+        cp -L "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "${_lk_cert_dir}/fullchain.pem"
+        cp -L "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" "${_lk_cert_dir}/privkey.pem"
+        chown "${_matrix_uid}:${_matrix_gid}" "${_lk_cert_dir}"/*.pem 2>/dev/null || true
+        chmod 640 "${_lk_cert_dir}"/*.pem
+        log "LiveKit серты: скопированы в ${_lk_cert_dir}/"
 
-    # Хук обновления сертов: копировать + рестартовать LiveKit, Coturn, nginx
-    # UID/GID вписываются в хук как литералы (определены сейчас, не меняются)
-    cat > /etc/letsencrypt/renewal-hooks/post/restart-matrix-tls.sh <<RLHOOK
+        # Coturn
+        _ct_cert_dir="${DATA_PATH}/coturn/certs"
+        mkdir -p "$_ct_cert_dir"
+        cp -L "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" "${_ct_cert_dir}/fullchain.pem"
+        cp -L "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" "${_ct_cert_dir}/privkey.pem"
+        chown "${_matrix_uid}:${_matrix_gid}" "${_ct_cert_dir}"/*.pem 2>/dev/null || true
+        chmod 640 "${_ct_cert_dir}"/*.pem
+        log "Coturn серты: скопированы в ${_ct_cert_dir}/"
+
+        # Хук обновления сертов: копировать + рестартовать LiveKit, Coturn, nginx
+        # UID/GID вписываются в хук как литералы (определены сейчас, не меняются)
+        cat >/etc/letsencrypt/renewal-hooks/post/restart-matrix-tls.sh <<RLHOOK
 #!/bin/bash
 DOMAIN="${DOMAIN}"
 LK_DIR="${_lk_cert_dir}"
@@ -731,28 +911,27 @@ systemctl restart matrix-livekit-server 2>/dev/null || true
 systemctl restart matrix-coturn 2>/dev/null || true
 systemctl restart nginx 2>/dev/null || true
 RLHOOK
-    chmod +x /etc/letsencrypt/renewal-hooks/post/restart-matrix-tls.sh
-    log "Certbot хук: restart-matrix-tls.sh создан"
-fi
-
-
-# =============================================================================
-# 10. Конфигурация nginx для Matrix
-# =============================================================================
-log "Настройка nginx для Matrix..."
-
-NGINX_CONF="/etc/nginx/sites-available/matrix.conf"
-
-# Вставка ssl_protocols TLSv1.3 если --tls13-only
-_ssl_extra() {
-    if [[ "$TLS13_ONLY" == true ]]; then
-        echo "    ssl_protocols TLSv1.3;"
+        chmod +x /etc/letsencrypt/renewal-hooks/post/restart-matrix-tls.sh
+        log "Certbot хук: restart-matrix-tls.sh создан"
     fi
-}
 
-# Общий блок проксирования в Traefik
-_proxy_block() {
-    cat <<PROXYBLOCK
+    # =============================================================================
+    # 10. Конфигурация nginx для Matrix
+    # =============================================================================
+    log "Настройка nginx для Matrix..."
+
+    NGINX_CONF="/etc/nginx/sites-available/matrix.conf"
+
+    # Вставка ssl_protocols TLSv1.3 если --tls13-only
+    _ssl_extra() {
+        if [[ "$TLS13_ONLY" == true ]]; then
+            echo "    ssl_protocols TLSv1.3;"
+        fi
+    }
+
+    # Общий блок проксирования в Traefik
+    _proxy_block() {
+        cat <<PROXYBLOCK
         proxy_pass http://127.0.0.1:81;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -778,12 +957,12 @@ _proxy_block() {
         proxy_send_timeout 600s;
         proxy_read_timeout 600s;
 PROXYBLOCK
-}
+    }
 
-# Блок для media upload — ограничение скорости, чтобы не забивать канал
-_media_location() {
-    cat <<MEDIABLOCK
-    # Media upload — троттлинг, чтобы большие файлы не блокировали сообщения
+    # Блок для media upload - ограничение скорости, чтобы не забивать канал
+    _media_location() {
+        cat <<MEDIABLOCK
+    # Media upload - троттлинг, чтобы большие файлы не блокировали сообщения
     location /_matrix/media/ {
         proxy_pass http://127.0.0.1:81;
         proxy_set_header Host \$host;
@@ -811,84 +990,85 @@ _media_location() {
         proxy_read_timeout 600s;
     }
 MEDIABLOCK
-}
+    }
 
-# Страница ошибок и landing page
-mkdir -p /var/www/matrix-landing
+    # Страница ошибок и landing page
+    mkdir -p /var/www/matrix-landing
 
-# Резолвим каталог шаблонов один раз (из плейбука: ../templates; из kit: ./templates)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_TPL_DIR=""
-for _d in "${SCRIPT_DIR}/../templates" "${SCRIPT_DIR}/templates"; do
-    [[ -d "$_d" ]] && { _TPL_DIR="$_d"; break; }
-done
+    # Резолвим каталог шаблонов один раз (из плейбука: ../templates; из kit: ./templates)
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    _TPL_DIR=""
+    for _d in "${SCRIPT_DIR}/../templates" "${SCRIPT_DIR}/templates"; do
+        [[ -d "$_d" ]] && {
+            _TPL_DIR="$_d"
+            break
+        }
+    done
 
-# Копируем error.html из шаблонов
-if [[ -n "$_TPL_DIR" && -f "$_TPL_DIR/error.html" ]]; then
-    cp "$_TPL_DIR/error.html" /var/www/matrix-landing/error.html
-    log "Страница ошибок скопирована"
-else
-    # Fallback: генерируем минимальную страницу
-    cat > /var/www/matrix-landing/error.html <<'ERROREOF'
+    # Копируем error.html из шаблонов
+    if [[ -n "$_TPL_DIR" && -f "$_TPL_DIR/error.html" ]]; then
+        cp "$_TPL_DIR/error.html" /var/www/matrix-landing/error.html
+        log "Страница ошибок скопирована"
+    else
+        # Fallback: генерируем минимальную страницу
+        cat >/var/www/matrix-landing/error.html <<'ERROREOF'
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>503</title>
 <style>body{background:#0a0a0a;color:#00ff41;font-family:monospace;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
 .c{text-align:center}.code{font-size:6rem;font-weight:900;text-shadow:0 0 20px #00ff41}.msg{margin-top:1rem;color:#00ff4180}</style>
 </head><body><div class="c"><div class="code">502</div><div class="msg">The machine sleeps. It will rise again.</div></div></body></html>
 ERROREOF
-    log "Страница ошибок сгенерирована (fallback)"
-fi
-
-# Landing page шаблоны
-if [[ "$WITH_LANDING_PAGE" == true ]]; then
-    if [[ -n "$_TPL_DIR" && -f "$_TPL_DIR/index.html" ]]; then
-        cp "$_TPL_DIR/index.html" /var/www/matrix-landing/index.html
-        sed -i "s|SERVER_DOMAIN|${DOMAIN}|g" /var/www/matrix-landing/index.html
-        log "Landing page скопирована"
+        log "Страница ошибок сгенерирована (fallback)"
     fi
-    if [[ -n "$_TPL_DIR" && -f "$_TPL_DIR/tos.html" ]]; then
-        cp "$_TPL_DIR/tos.html" /var/www/matrix-landing/tos.html
-        sed -i "s|SERVER_DOMAIN|${DOMAIN}|g" /var/www/matrix-landing/tos.html
-        log "ToS page скопирована"
-    fi
-fi
 
-# Формируем списки server_name для nginx блоков
-_SN_EXTRA=""
-[[ "$WITH_NTFY" == true ]] && _SN_EXTRA="${_SN_EXTRA}
+    # Landing page шаблоны
+    if [[ "$WITH_LANDING_PAGE" == true ]]; then
+        if [[ -n "$_TPL_DIR" && -f "$_TPL_DIR/index.html" ]]; then
+            cp "$_TPL_DIR/index.html" /var/www/matrix-landing/index.html
+            sed -i "s|SERVER_DOMAIN|${DOMAIN}|g" /var/www/matrix-landing/index.html
+            log "Landing page скопирована"
+        fi
+        if [[ -n "$_TPL_DIR" && -f "$_TPL_DIR/tos.html" ]]; then
+            cp "$_TPL_DIR/tos.html" /var/www/matrix-landing/tos.html
+            sed -i "s|SERVER_DOMAIN|${DOMAIN}|g" /var/www/matrix-landing/tos.html
+            log "ToS page скопирована"
+        fi
+    fi
+
+    # Формируем списки server_name для nginx блоков
+    _SN_EXTRA=""
+    [[ "$WITH_NTFY" == true ]] && _SN_EXTRA="${_SN_EXTRA}
         ntfy.${DOMAIN}"
 
-# "сервисные домены" (без base domain — он в отдельном блоке)
-_SN_SERVICES="    server_name
+    # "сервисные домены" (без base domain - он в отдельном блоке)
+    _SN_SERVICES="    server_name
         matrix.${DOMAIN}
         element.${DOMAIN}${_SN_EXTRA};"
 
-# HTTP redirect (все домены)
-_SN_REDIRECT="    server_name
+    # HTTP redirect (все домены)
+    _SN_REDIRECT="    server_name
         ${DOMAIN}
         matrix.${DOMAIN}
         element.${DOMAIN}${_SN_EXTRA};"
 
-{
-cat <<NGINXEOF
-# Matrix server — nginx reverse-proxy
+    {
+        cat <<NGINXEOF
+# Matrix server - nginx reverse-proxy
 # Автоматически сгенерировано prepare_server.sh
 
-# Безопасность: скрываем версию nginx
-server_tokens off;
-
-# Логи отключены
+# Логи отключены (matrix.conf пишет только error_page в /var/log/nginx/)
 access_log off;
 error_log /dev/null;
 
 NGINXEOF
 
-# --- Base domain: DOMAIN ---
-cat <<NGINXEOF
+        # --- Base domain: DOMAIN ---
+        cat <<NGINXEOF
 # --- HTTPS: ${DOMAIN} (base domain) ---
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
 
     server_name ${DOMAIN};
 
@@ -908,7 +1088,7 @@ $(_ssl_extra)
     root /var/www/html;
     index index.html index.nginx-debian.html;
 
-    # .well-known — делегация Matrix → Traefik
+    # .well-known - делегация Matrix → Traefik
     location /.well-known {
         proxy_pass http://127.0.0.1:81;
         proxy_set_header Host \$host;
@@ -937,13 +1117,14 @@ $(_ssl_extra)
 
 NGINXEOF
 
-# --- matrix.DOMAIN: с landing page или без ---
-if [[ "$WITH_LANDING_PAGE" == true ]]; then
-cat <<NGINXEOF
-# --- HTTPS: matrix.${DOMAIN} — с landing page ---
+        # --- matrix.DOMAIN: с landing page или без ---
+        if [[ "$WITH_LANDING_PAGE" == true ]]; then
+            cat <<NGINXEOF
+# --- HTTPS: matrix.${DOMAIN} - с landing page ---
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
 
     server_name matrix.${DOMAIN};
 
@@ -988,7 +1169,7 @@ $(_ssl_extra)
 
 $(_media_location)
 
-    # Всё остальное — в Traefik
+    # Всё остальное - в Traefik
     location / {
 $(_proxy_block)
     }
@@ -1002,8 +1183,9 @@ $(_proxy_block)
 
 # --- HTTPS: остальные сервисы ---
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
 
     server_name
         element.${DOMAIN}${_SN_EXTRA};
@@ -1032,12 +1214,13 @@ $(_proxy_block)
     }
 }
 NGINXEOF
-else
-cat <<NGINXEOF
+        else
+            cat <<NGINXEOF
 # --- HTTPS: все сервисы Matrix ---
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
 
 ${_SN_SERVICES}
 
@@ -1067,15 +1250,16 @@ $(_proxy_block)
     }
 }
 NGINXEOF
-fi
+        fi
 
-if [[ "$FEDERATION_ON_443" != true ]]; then
-cat <<NGINXEOF
+        if [[ "$FEDERATION_ON_443" != true ]]; then
+            cat <<NGINXEOF
 
 # --- HTTPS: Matrix Federation (порт 8448) ---
 server {
-    listen 8448 ssl http2 default_server;
-    listen [::]:8448 ssl http2 default_server;
+    listen 8448 ssl default_server;
+    listen [::]:8448 ssl default_server;
+    http2 on;
 
     server_name matrix.${DOMAIN};
 
@@ -1113,9 +1297,9 @@ $(_ssl_extra)
     }
 }
 NGINXEOF
-fi
+        fi
 
-cat <<NGINXEOF
+        cat <<NGINXEOF
 
 # --- HTTP → HTTPS redirect ---
 server {
@@ -1134,14 +1318,15 @@ ${_SN_REDIRECT}
 }
 NGINXEOF
 
-# --- Ketesa на отдельном порту ---
-if [[ -n "$KETESA_PORT" ]]; then
-cat <<NGINXEOF
+        # --- Ketesa на отдельном порту ---
+        if [[ -n "$KETESA_PORT" ]]; then
+            cat <<NGINXEOF
 
 # --- HTTPS: Ketesa (порт ${KETESA_PORT}) ---
 server {
-    listen ${KETESA_PORT} ssl http2;
-    listen [::]:${KETESA_PORT} ssl http2;
+    listen ${KETESA_PORT} ssl;
+    listen [::]:${KETESA_PORT} ssl;
+    http2 on;
 
     server_name matrix.${DOMAIN};
 
@@ -1184,16 +1369,17 @@ $(_ssl_extra)
     }
 }
 NGINXEOF
-fi
+        fi
 
-# --- Element Admin на отдельном порту ---
-if [[ -n "$ELEMENT_ADMIN_PORT" ]]; then
-cat <<NGINXEOF
+        # --- Element Admin на отдельном порту ---
+        if [[ -n "$ELEMENT_ADMIN_PORT" ]]; then
+            cat <<NGINXEOF
 
 # --- HTTPS: Element Admin (порт ${ELEMENT_ADMIN_PORT}) ---
 server {
-    listen ${ELEMENT_ADMIN_PORT} ssl http2;
-    listen [::]:${ELEMENT_ADMIN_PORT} ssl http2;
+    listen ${ELEMENT_ADMIN_PORT} ssl;
+    listen [::]:${ELEMENT_ADMIN_PORT} ssl;
+    http2 on;
 
     server_name matrix.${DOMAIN};
 
@@ -1236,21 +1422,21 @@ $(_ssl_extra)
     }
 }
 NGINXEOF
-fi
+        fi
 
-} > "$NGINX_CONF"
+    } >"$NGINX_CONF"
 
-# Включаем конфиг
-ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/matrix.conf
+    # Включаем конфиг
+    ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/matrix.conf
 
-# Проверяем и перезапускаем
-if nginx -t 2>/dev/null; then
-    systemctl restart nginx
-    log "nginx перезапущен (новый конфиг активен)"
-else
-    warn "nginx конфиг невалиден (возможно сертификаты ещё не получены)"
-    warn "После получения сертификатов: nginx -t && systemctl restart nginx"
-fi
+    # Проверяем и перезапускаем
+    if nginx -t 2>/dev/null; then
+        systemctl restart nginx
+        log "nginx перезапущен (новый конфиг активен)"
+    else
+        warn "nginx конфиг невалиден (возможно сертификаты ещё не получены)"
+        warn "После получения сертификатов: nginx -t && systemctl restart nginx"
+    fi
 
 else
     info "Режим Traefik-only: nginx и certbot не устанавливаются"
@@ -1258,8 +1444,7 @@ else
     info "Admin-панели доступны через пути/поддомены (настраивается в vars.yml):"
     info "  Ketesa: matrix.${DOMAIN}/ketesa (по умолчанию)"
     info "  Element Admin: admin.element.${DOMAIN}/ (по умолчанию)"
-fi  # SKIP_NGINX
-
+fi # SKIP_NGINX
 
 # =============================================================================
 # 11. fail2ban (опционально, включается через --with-fail2ban)
@@ -1269,7 +1454,7 @@ if [[ "$SKIP_FAIL2BAN" == false ]]; then
 
     apt-get install -y -qq fail2ban
 
-    cat > /etc/fail2ban/jail.local <<EOF
+    cat >/etc/fail2ban/jail.local <<EOF
 [DEFAULT]
 bantime = 3600
 findtime = 600
@@ -1283,7 +1468,7 @@ maxretry = 3
 EOF
 
     if [[ "$SKIP_NGINX" == false ]]; then
-        cat >> /etc/fail2ban/jail.local <<EOF
+        cat >>/etc/fail2ban/jail.local <<EOF
 
 [nginx-http-auth]
 enabled = true
@@ -1300,7 +1485,6 @@ else
     info "fail2ban пропущен (включить: --with-fail2ban)"
 fi
 
-
 # =============================================================================
 # 12. Kernel tuning (сетевой стек)
 # =============================================================================
@@ -1309,12 +1493,12 @@ log "Оптимизация сетевого стека..."
 # BBR availability check (Linux 4.9+)
 modprobe tcp_bbr 2>/dev/null || true
 _HAS_BBR=0
-if [[ -f /proc/sys/net/ipv4/tcp_available_congestion_control ]] && \
-   grep -q bbr /proc/sys/net/ipv4/tcp_available_congestion_control; then
+if [[ -f /proc/sys/net/ipv4/tcp_available_congestion_control ]] &&
+    grep -q bbr /proc/sys/net/ipv4/tcp_available_congestion_control; then
     _HAS_BBR=1
 fi
 
-cat > /etc/sysctl.d/99-matrix-network.conf <<'EOF'
+cat >/etc/sysctl.d/99-matrix-network.conf <<'EOF'
 # TCP buffers (16MB max) - long-running sync streams
 net.core.rmem_max = 16777216
 net.core.wmem_max = 16777216
@@ -1333,7 +1517,7 @@ net.ipv4.conf.all.accept_redirects = 0
 net.ipv4.conf.default.accept_redirects = 0
 net.ipv4.conf.all.send_redirects = 0
 
-# Keepalive — критично для Matrix /sync long-poll через NAT/proxy.
+# Keepalive - критично для Matrix /sync long-poll через NAT/proxy.
 # Default 7200s = 2 часа: idle connection silently дропается в NAT.
 net.ipv4.tcp_keepalive_time = 60
 net.ipv4.tcp_keepalive_intvl = 10
@@ -1352,7 +1536,7 @@ fs.file-max = 1048576
 EOF
 
 if [[ "$_HAS_BBR" -eq 1 ]]; then
-    cat >> /etc/sysctl.d/99-matrix-network.conf <<'EOF'
+    cat >>/etc/sysctl.d/99-matrix-network.conf <<'EOF'
 
 # BBR congestion control - significantly better than cubic on lossy/wireless
 net.core.default_qdisc = fq
@@ -1366,7 +1550,6 @@ if [[ "$_HAS_BBR" -eq 1 ]]; then
 else
     log "Сетевой стек оптимизирован (BBR недоступен - kernel <4.9)"
 fi
-
 
 # =============================================================================
 # Итоги
@@ -1388,48 +1571,48 @@ command -v docker &>/dev/null && echo "    Docker:   $(docker --version 2>/dev/n
 command -v ansible &>/dev/null && echo "    Ansible:  $(ansible --version 2>/dev/null | head -1)"
 command -v just &>/dev/null && echo "    just:     $(just --version 2>/dev/null)"
 if [[ "$PROXY_MODE" == "nginx" ]]; then
-echo "    nginx:    $(nginx -v 2>&1 | head -1)"
-echo "    certbot:  $(certbot --version 2>&1 | head -1)"
+    echo "    nginx:    $(nginx -v 2>&1 | head -1)"
+    echo "    certbot:  $(certbot --version 2>&1 | head -1)"
 fi
 if [[ "$SKIP_FAIL2BAN" == false ]]; then
-echo "    fail2ban: $(fail2ban-client --version 2>&1 | head -1)"
+    echo "    fail2ban: $(fail2ban-client --version 2>&1 | head -1)"
 fi
 echo ""
 if [[ "$PROXY_MODE" == "nginx" ]]; then
-echo "  Reverse proxy:    nginx → Traefik"
-echo "  SSL сертификат:   ${CERT_PATH}"
-echo "  nginx конфиг:     /etc/nginx/sites-available/matrix.conf"
+    echo "  Reverse proxy:    nginx → Traefik"
+    echo "  SSL сертификат:   ${CERT_PATH}"
+    echo "  nginx конфиг:     /etc/nginx/sites-available/matrix.conf"
 else
-echo "  Reverse proxy:    Traefik-only (SSL через Let's Encrypt ACME)"
+    echo "  Reverse proxy:    Traefik-only (SSL через Let's Encrypt ACME)"
 fi
 echo ""
 if [[ "$PROXY_MODE" == "nginx" ]]; then
     if [[ -n "$KETESA_PORT" || -n "$ELEMENT_ADMIN_PORT" ]]; then
-echo "  Admin-панели (nginx → Traefik):"
-[[ -n "$KETESA_PORT" ]] && echo "    Ketesa:  https://matrix.${DOMAIN}:${KETESA_PORT}/"
-[[ -n "$ELEMENT_ADMIN_PORT" ]] && echo "    Element Admin:  https://matrix.${DOMAIN}:${ELEMENT_ADMIN_PORT}/"
-echo ""
+        echo "  Admin-панели (nginx → Traefik):"
+        [[ -n "$KETESA_PORT" ]] && echo "    Ketesa:  https://matrix.${DOMAIN}:${KETESA_PORT}/"
+        [[ -n "$ELEMENT_ADMIN_PORT" ]] && echo "    Element Admin:  https://matrix.${DOMAIN}:${ELEMENT_ADMIN_PORT}/"
+        echo ""
     fi
     if [[ "$WITH_LANDING_PAGE" == true ]]; then
-echo "  Landing page:     /var/www/matrix-landing/index.html"
-echo "  Terms of Service: /var/www/matrix-landing/tos.html"
-echo ""
+        echo "  Landing page:     /var/www/matrix-landing/index.html"
+        echo "  Terms of Service: /var/www/matrix-landing/tos.html"
+        echo ""
     fi
 else
-echo "  Admin-панели (Traefik):"
-echo "    Ketesa:  https://matrix.${DOMAIN}/ketesa (по умолчанию)"
-echo "    Element Admin:  https://admin.element.${DOMAIN}/ (по умолчанию)"
-echo "    (настраивается через hostname/path_prefix в vars.yml)"
-echo ""
+    echo "  Admin-панели (Traefik):"
+    echo "    Ketesa:  https://matrix.${DOMAIN}/ketesa (по умолчанию)"
+    echo "    Element Admin:  https://admin.element.${DOMAIN}/ (по умолчанию)"
+    echo "    (настраивается через hostname/path_prefix в vars.yml)"
+    echo ""
 fi
 echo "  DNS записи (должны указывать на ${SERVER_IP}):"
 echo "    A  ${DOMAIN}                -> ${SERVER_IP}  (stub + .well-known)"
 echo "    A  matrix.${DOMAIN}         -> ${SERVER_IP}  (Synapse homeserver)"
 echo "    A  element.${DOMAIN}        -> ${SERVER_IP}  (Element Web)"
-[[ "$WITH_NTFY" == true ]] && \
-echo "    A  ntfy.${DOMAIN}            -> ${SERVER_IP}  (ntfy push-уведомления)"
+[[ "$WITH_NTFY" == true ]] &&
+    echo "    A  ntfy.${DOMAIN}            -> ${SERVER_IP}  (ntfy push-уведомления)"
 echo ""
-echo "  Следующий шаг — запуск плейбука:"
+echo "  Следующий шаг - запуск плейбука:"
 echo "    cd matrix-docker-ansible-deploy"
 echo "    just roles"
 echo "    just install-all"

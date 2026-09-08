@@ -6,7 +6,7 @@ services:
     volumes:
       - ./data:/data
     environment:
-      # Required — fill in your values
+      # Required - fill in your values
       - EXPIRE_BOT_HOMESERVER=https://matrix.example.com
       - EXPIRE_BOT_USER=@expire-bot:example.com
       - EXPIRE_BOT_PASSWORD=changeme

@@ -1,4 +1,4 @@
-# Matrix Server — Справочник параметров vars.yml
+# Matrix Server - Справочник параметров vars.yml
 
 Этот файл описывает **все параметры**, которые можно настроить в `vars.yml`.
 Генератор `generate_vars.sh` создаёт этот файл автоматически, но ты можешь
@@ -69,7 +69,7 @@ Traefik сам управляет SSL через Let's Encrypt ACME. Проще,
 
 ```yaml
 matrix_playbook_reverse_proxy_type: playbook-managed-traefik
-# Всё остальное — по умолчанию
+# Всё остальное - по умолчанию
 ```
 
 ---
@@ -105,13 +105,13 @@ matrix_synapse_self_check_validate_certificates: true
 # false = изолированный корпоративный мессенджер
 matrix_homeserver_federation_enabled: true
 
-# Whitelist — разрешить федерацию ТОЛЬКО с этими серверами
+# Whitelist - разрешить федерацию ТОЛЬКО с этими серверами
 # Пусто (~) = все разрешены
 matrix_synapse_federation_domain_whitelist:
   - 'matrix.org'
   - 'mozilla.org'
 
-# Blacklist — заблокировать конкретные серверы (через extension)
+# Blacklist - заблокировать конкретные серверы (через extension)
 matrix_synapse_configuration_extension_yaml: |
   federation_domain_blacklist:
     - 'evil.server.com'
@@ -141,7 +141,7 @@ matrix_federation_traefik_entrypoint_name: web
 ### С MAS (рекомендуется)
 
 ```yaml
-# MAS — современный сервис аутентификации
+# MAS - современный сервис аутентификации
 matrix_authentication_service_enabled: true
 
 # Открытая регистрация (любой может создать аккаунт)
@@ -153,7 +153,7 @@ matrix_authentication_service_config_account_email_required: true
 # Регистрация по токенам (invite-only)
 matrix_authentication_service_config_account_registration_token_required: true
 
-# ToS — чекбокс при регистрации
+# ToS - чекбокс при регистрации
 matrix_authentication_service_configuration_extension_yaml: |
   branding:
     tos_uri: 'https://matrix.example.com/tos'
@@ -187,18 +187,70 @@ matrix_synapse_allow_guest_access: true
 
 ## 8. Element Web (клиент)
 
+Все переменные ниже управляются через wizard в секции `6/12 Веб-клиент (Element Web)`.
+
 ```yaml
 # Включить веб-клиент на element.example.com
 matrix_client_element_enabled: true
 
-# Кастомное название сервера в Element
-matrix_client_element_brand: "My Matrix Server"
+# Название бренда (видно в заголовке вкладки и на странице входа)
+matrix_client_element_brand: "Example Chat"
 
-# Тема по умолчанию
-matrix_client_element_default_theme: dark  # dark или light
+# Тема по умолчанию: light | dark
+matrix_client_element_default_theme: dark
 
-# Показывать форму регистрации
+# Показывать кнопку «Создать аккаунт» на странице входа
 matrix_client_element_registration_enabled: true
+
+# Кастомный логотип на странице входа (пусто → стандартный Element)
+matrix_client_element_welcome_logo: "https://example.com/logo.png"
+matrix_client_element_branding_auth_header_logo_url: "https://example.com/logo.png"
+
+# Кастомный фон (пусто → дефолтный themes/element/img/backgrounds/lake.jpg,
+# который подкладывается вместо upstream null для фикса 404)
+matrix_client_element_branding_welcome_background_url: "https://example.com/bg.jpg"
+
+# Код страны для телефонных номеров (ISO 3166-1 alpha-2)
+matrix_client_element_default_country_code: "RU"
+
+# Гостевой доступ (без аккаунта)
+matrix_client_element_disable_guests: false
+
+# Раздел Lab Settings (экспериментальные функции)
+matrix_client_element_show_lab_settings: true
+
+# URL для баг-репортов (пусто → element.io по умолчанию)
+matrix_client_element_bug_report_endpoint_url: "https://bugs.example.com"
+
+# Ссылки в подвале страницы входа (JSON-массив)
+matrix_client_element_branding_auth_footer_links: |
+  [
+    {"text": "Условия использования", "url": "https://example.com/tos"},
+    {"text": "Политика конфиденциальности", "url": "https://example.com/tos#privacy"}
+  ]
+```
+
+### Дополнительные тюнинги (не в wizard, но работают)
+
+```yaml
+# Кастомный homeserver (для split-domain: matrix на одном имени, web - на другом)
+matrix_client_element_default_server_name: "example.com"
+matrix_client_element_default_hs_url: "https://matrix.example.com"
+
+# Публичные серверы каталогов комнат
+matrix_client_element_room_directory_servers:
+  - "matrix.org"
+  - "example.com"
+
+# Кастомные темы (полный список переменных см. в MADA docs)
+matrix_client_element_setting_defaults_custom_themes: []
+
+# Расширенный JSON-конфиг (escape hatch)
+matrix_client_element_configuration_extension_json: |
+  {
+    "disable_3pid_login": false,
+    "disable_login_language_selector": false
+  }
 ```
 
 ---
@@ -206,14 +258,14 @@ matrix_client_element_registration_enabled: true
 ## 9. Звонки (LiveKit)
 
 ```yaml
-# ГЛАВНЫЙ ПЕРЕКЛЮЧАТЕЛЬ — включает весь RTC-стек:
+# ГЛАВНЫЙ ПЕРЕКЛЮЧАТЕЛЬ - включает весь RTC-стек:
 # LiveKit SFU → JWT-сервис → .well-known/matrix/client (rtc_foci)
 matrix_rtc_enabled: true
 
 # Кнопка звонков в Element Web (просто флаг в config.json, не отдельный сервис)
 matrix_client_element_element_call_enabled: true
 
-# Element Call Frontend — отдельная веб-страница для звонков
+# Element Call Frontend - отдельная веб-страница для звонков
 # НЕ нужна для звонков из Element Web/X (клиенты имеют встроенную поддержку)
 matrix_element_call_enabled: false
 
@@ -224,7 +276,7 @@ livekit_server_container_rtc_udp_bind_port: 7882    # ICE/UDP
 
 ### LiveKit TURN TLS (nginx+Traefik режим)
 
-В nginx+Traefik режиме Traefik не управляет ACME-сертификатами — LiveKit нужны
+В nginx+Traefik режиме Traefik не управляет ACME-сертификатами - LiveKit нужны
 свои TLS-серты. `prepare_server.sh` копирует certbot-серты автоматически.
 
 ```yaml
@@ -309,7 +361,7 @@ matrix_client_element_admin_container_labels_traefik_hostname: element-admin.int
 ## 12. Coturn (TURN/STUN)
 
 Помогает установить звонки через NAT и файрвол. **Без него звонки могут не работать**.
-Coturn — общий TURN для legacy VoIP, LiveKit TURN — для SFU-connectivity (разные сервисы).
+Coturn - общий TURN для legacy VoIP, LiveKit TURN - для SFU-connectivity (разные сервисы).
 
 ```yaml
 # Включить Coturn
@@ -346,7 +398,7 @@ coturn_tls_cert_path: /certs/fullchain.pem
 coturn_tls_key_path: /certs/privkey.pem
 
 # Монтирование сертов (ВАЖНО: использовать coturn_container_additional_volumes,
-# НЕ _custom — group_vars перезаписывает combined переменную напрямую!)
+# НЕ _custom - group_vars перезаписывает combined переменную напрямую!)
 coturn_container_additional_volumes:
   - src: /var/matrix/coturn/certs
     dst: /certs
@@ -367,7 +419,7 @@ matrix_synapse_turn_uris:
   - 'turn:matrix.example.com:19563?transport=tcp'
 ```
 
-> **Стандартные порты** (3478/5349) не требуют переопределения URI — клиенты
+> **Стандартные порты** (3478/5349) не требуют переопределения URI - клиенты
 > используют их по умолчанию.
 
 ---
@@ -463,9 +515,9 @@ matrix_synapse_email_notif_from: 'Matrix Server <matrix@example.com>'
 matrix_synapse_workers_enabled: true
 
 # Пресет:
-#   little-federation-helper — 1 воркер (для слабых VPS, <50 юзеров)
-#   one-of-each             — 12 воркеров (50-200 юзеров, 4+ GB RAM)
-#   specialized-workers     — 14 воркеров (200+ юзеров, 8+ GB RAM)
+#   little-federation-helper - 1 воркер (для слабых VPS, <50 юзеров)
+#   one-of-each             - 12 воркеров (50-200 юзеров, 4+ GB RAM)
+#   specialized-workers     - 14 воркеров (200+ юзеров, 8+ GB RAM)
 matrix_synapse_workers_preset: little-federation-helper
 ```
 
@@ -477,7 +529,7 @@ matrix_synapse_workers_preset: little-federation-helper
 | one-of-each | +12 | 4+ GB | Средний сервер |
 | specialized-workers | +14 | 8+ GB | Нагруженный сервер |
 
-> **Совет**: Если сервер тормозит при деплое — уменьши пресет или отключи workers.
+> **Совет**: Если сервер тормозит при деплое - уменьши пресет или отключи workers.
 
 ---
 
@@ -591,7 +643,7 @@ matrix_appservice_webhooks_enabled: true
 | Instagram | `@instagrambot:domain` | `login` |
 | Messenger | `@messengerbot:domain` | `login` |
 
-> **Как это работает**: Мост создаёт "портал" — комнату в Matrix,
+> **Как это работает**: Мост создаёт "портал" - комнату в Matrix,
 > которая отзеркаливает чат из другого мессенджера. Сообщения идут в обе стороны.
 
 ---
@@ -698,7 +750,7 @@ matrix_synapse_registration_requires_token: true
 ```
 
 > Роль `matrix-registration` (и переменные `matrix_registration_*`) удалена из
-> плейбука в мае 2026 — токены теперь даёт MAS или нативный Synapse.
+> плейбука в мае 2026 - токены теперь даёт MAS или нативный Synapse.
 
 ---
 
@@ -707,7 +759,7 @@ matrix_synapse_registration_requires_token: true
 В файле `ansible.cfg`:
 
 ```ini
-# Mitogen — ускоряет в 3-5 раз
+# Mitogen - ускоряет в 3-5 раз
 # pip3 install mitogen
 strategy_plugins = /path/to/ansible_mitogen/plugins/strategy
 strategy = mitogen_linear

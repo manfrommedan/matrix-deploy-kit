@@ -1,0 +1,34 @@
+# Local artifacts
+/.kit-state/
+/.last-backup-check
+/var/
+
+# Ansible/produced state (when kit is run from a checkout)
+/inventory/host_vars/
+/group_vars/all/vars.yml
+/group_vars/all/vars.yaml
+!group_vars/all/vars.example.yml
+
+# Environment overrides
+/.env
+/.env.*
+!/.env.example
+!.env.example
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Python (used by bots/expire-bot)
+/bots/**/__pycache__/
+/bots/**/*.pyc
+/bots/**/*.egg-info/
+
+# Build / test
+/coverage/
+/htmlcov/
+/.pytest_cache/
+/.mypy_cache/
+/.ruff_cache/

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Matrix Server — безопасное обновление
+# Matrix Server - безопасное обновление
 # =============================================================================
 # Запуск из корня плейбука:
 #   bash tools/update.sh                  # полное обновление
@@ -23,11 +23,15 @@ DIM='\033[2m'
 NC='\033[0m'
 
 # --- Вывод ---
-log()     { echo -e "${GREEN}[+]${NC} $*"; }
-warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
-err()     { echo -e "${RED}[x]${NC} $*" >&2; }
-info()    { echo -e "${BLUE}[i]${NC} $*"; }
-step()    { echo ""; echo -e "${BOLD}${CYAN}--- $* ---${NC}"; echo ""; }
+log() { echo -e "${GREEN}[+]${NC} $*"; }
+warn() { echo -e "${YELLOW}[!]${NC} $*"; }
+err() { echo -e "${RED}[x]${NC} $*" >&2; }
+info() { echo -e "${BLUE}[i]${NC} $*"; }
+step() {
+    echo ""
+    echo -e "${BOLD}${CYAN}--- $* ---${NC}"
+    echo ""
+}
 
 # --- Пути ---
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,17 +51,47 @@ NGINX_CONF="/etc/nginx/sites-available/matrix.conf"
 # --- Парсинг аргументов ---
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --playbook-dir|-p) PLAYBOOK_ROOT="$2"; shift 2 ;;
-        --dry-run|-n)      DRY_RUN=true; shift ;;
-        --skip-backup)     SKIP_BACKUP=true; shift ;;
-        --backup-only)     BACKUP_ONLY=true; shift ;;
-        --force|-f)        FORCE=true; shift ;;
-        --reload-nginx|--reload-proxy) RELOAD_NGINX=true; shift ;;
-        --sync-certs)      SYNC_CERTS_ONLY=true; shift ;;
-        --backup-dir)      BACKUP_DIR="$2"; shift 2 ;;
-        --data-path)       MATRIX_DATA_PATH="$2"; shift 2 ;;
-        --nginx-conf)      NGINX_CONF="$2"; shift 2 ;;
-        -h|--help)
+        --playbook-dir | -p)
+            PLAYBOOK_ROOT="$2"
+            shift 2
+            ;;
+        --dry-run | -n)
+            DRY_RUN=true
+            shift
+            ;;
+        --skip-backup)
+            SKIP_BACKUP=true
+            shift
+            ;;
+        --backup-only)
+            BACKUP_ONLY=true
+            shift
+            ;;
+        --force | -f)
+            FORCE=true
+            shift
+            ;;
+        --reload-nginx | --reload-proxy)
+            RELOAD_NGINX=true
+            shift
+            ;;
+        --sync-certs)
+            SYNC_CERTS_ONLY=true
+            shift
+            ;;
+        --backup-dir)
+            BACKUP_DIR="$2"
+            shift 2
+            ;;
+        --data-path)
+            MATRIX_DATA_PATH="$2"
+            shift 2
+            ;;
+        --nginx-conf)
+            NGINX_CONF="$2"
+            shift 2
+            ;;
+        -h | --help)
             echo "Использование: update.sh [ОПЦИИ]"
             echo ""
             echo "Опции:"
@@ -78,7 +112,10 @@ while [[ $# -gt 0 ]]; do
             echo "  bash update.sh -p /opt/matrix-docker-ansible-deploy --dry-run"
             exit 0
             ;;
-        *) err "Неизвестный параметр: $1"; exit 1 ;;
+        *)
+            err "Неизвестный параметр: $1"
+            exit 1
+            ;;
     esac
 done
 
@@ -104,7 +141,6 @@ fi
 
 TIMESTAMP=$(date '+%Y%m%d-%H%M%S')
 BACKUP_FILE="${BACKUP_DIR}/postgres-${TIMESTAMP}.sql.gz"
-
 
 # =============================================================================
 # Проверки
@@ -144,7 +180,6 @@ postgres_running() {
     docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^matrix-postgres$"
 }
 
-
 # =============================================================================
 # Бэкап PostgreSQL
 # =============================================================================
@@ -153,7 +188,7 @@ do_backup() {
     step "Бэкап PostgreSQL"
 
     if ! postgres_running; then
-        warn "Контейнер matrix-postgres не запущен — бэкап невозможен"
+        warn "Контейнер matrix-postgres не запущен - бэкап невозможен"
         if [[ "$BACKUP_ONLY" == true ]]; then
             err "Нечего бэкапить. Выход."
             exit 1
@@ -176,8 +211,8 @@ do_backup() {
     if /usr/bin/docker exec \
         --env-file="${MATRIX_DATA_PATH}/postgres/env-postgres-psql" \
         matrix-postgres \
-        /usr/local/bin/pg_dumpall -h matrix-postgres \
-        | gzip -c > "$BACKUP_FILE"; then
+        /usr/local/bin/pg_dumpall -h matrix-postgres |
+        gzip -c >"$BACKUP_FILE"; then
 
         BACKUP_SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
         log "Бэкап создан: ${BACKUP_FILE} (${BACKUP_SIZE})"
@@ -194,17 +229,16 @@ do_backup() {
     local backup_count
     backup_count=$(find "$BACKUP_DIR" -name "postgres-*.sql.gz" -type f 2>/dev/null | wc -l)
 
-    if (( backup_count > 5 )); then
+    if ((backup_count > 5)); then
         info "Ротация бэкапов: удаляем старые (оставляем 5 последних)"
-        find "$BACKUP_DIR" -name "postgres-*.sql.gz" -type f \
-            | sort | head -n -5 \
-            | while read -r old_backup; do
+        find "$BACKUP_DIR" -name "postgres-*.sql.gz" -type f |
+            sort | head -n -5 |
+            while read -r old_backup; do
                 rm -f "$old_backup"
                 info "  Удалён: $(basename "$old_backup")"
             done
     fi
 }
-
 
 # =============================================================================
 # Проверка обновлений (changelog)
@@ -229,7 +263,6 @@ check_changelog() {
         warn "CHANGELOG.md не найден"
     fi
 }
-
 
 # =============================================================================
 # Обновление плейбука
@@ -279,7 +312,6 @@ update_playbook() {
     fi
 }
 
-
 # =============================================================================
 # Обновление ролей (Galaxy)
 # =============================================================================
@@ -309,7 +341,6 @@ update_roles() {
 
     log "Роли обновлены"
 }
-
 
 # =============================================================================
 # Применение обновлений
@@ -345,7 +376,7 @@ apply_update() {
     info "Запуск ansible-playbook (это может занять несколько минут)..."
     echo ""
 
-    # Фикс локали — предотвращает ошибки Python/Ansible на серверах без настроенной локали
+    # Фикс локали - предотвращает ошибки Python/Ansible на серверах без настроенной локали
     export LC_ALL="${LC_ALL:-C.UTF-8}" LANG="${LANG:-C.UTF-8}"
 
     ansible-playbook \
@@ -355,7 +386,6 @@ apply_update() {
 
     log "Обновления применены"
 }
-
 
 # =============================================================================
 # Определение режима прокси и домена
@@ -396,11 +426,11 @@ _vars_yml() {
     local var_name="$1"
     local vars_file="${PLAYBOOK_ROOT}/inventory/host_vars/${MATRIX_HOSTNAME}/vars.yml"
     if [[ -f "$vars_file" ]]; then
-        grep "^${var_name}:" "$vars_file" 2>/dev/null \
-            | head -1 \
-            | sed 's/^[^:]*:[[:space:]]*//' \
-            | sed 's/^["'"'"']//' \
-            | sed 's/["'"'"']$//'
+        grep "^${var_name}:" "$vars_file" 2>/dev/null |
+            head -1 |
+            sed 's/^[^:]*:[[:space:]]*//' |
+            sed 's/^["'"'"']//' |
+            sed 's/["'"'"']$//'
     fi
 }
 
@@ -424,12 +454,12 @@ detect_admin_endpoints() {
             if [[ "$line" =~ Host[[:space:]]+element-admin\.internal ]]; then
                 ea_port="$current_port"
             fi
-        done < "$NGINX_CONF"
+        done <"$NGINX_CONF"
 
         [[ -n "$sa_port" ]] && SYNAPSE_ADMIN_URL="https://${MATRIX_HOSTNAME}:${sa_port}/"
         [[ -n "$ea_port" ]] && ELEMENT_ADMIN_URL="https://${MATRIX_HOSTNAME}:${ea_port}/"
 
-        # Если admin не на порту — проверяем path из vars.yml
+        # Если admin не на порту - проверяем path из vars.yml
         # Ketesa (новый, приоритет) → synapse-admin (legacy fallback)
         if [[ -z "$SYNAPSE_ADMIN_URL" ]]; then
             local sa_enabled
@@ -499,9 +529,8 @@ detect_admin_endpoints() {
     fi
 }
 
-
 # =============================================================================
-# nginx / Traefik — перезагрузка reverse proxy
+# nginx / Traefik - перезагрузка reverse proxy
 # =============================================================================
 
 reload_proxy() {
@@ -538,7 +567,6 @@ reload_proxy() {
     fi
 }
 
-
 # =============================================================================
 # Проверка здоровья
 # =============================================================================
@@ -563,18 +591,18 @@ health_check() {
         if docker ps --format '{{.Names}}' | grep -q "^${container}$"; then
             echo -e "    ${GREEN}●${NC} ${container}"
         else
-            echo -e "    ${RED}●${NC} ${container} — НЕ ЗАПУЩЕН"
+            echo -e "    ${RED}●${NC} ${container} - НЕ ЗАПУЩЕН"
             all_ok=false
         fi
     done
 
-    # Дополнительные сервисы — проверяем если запущены
+    # Дополнительные сервисы - проверяем если запущены
     local extra_containers
     extra_containers=$(docker ps --format '{{.Names}}' | grep "^matrix-" | grep -v -E "^(matrix-synapse|matrix-postgres|matrix-traefik)$" | sort)
     if [[ -n "$extra_containers" ]]; then
         while IFS= read -r container; do
             echo -e "    ${GREEN}●${NC} ${container}"
-        done <<< "$extra_containers"
+        done <<<"$extra_containers"
     fi
 
     echo ""
@@ -601,16 +629,16 @@ health_check() {
     info "Reverse proxy (${PROXY_MODE}):"
     if [[ "$PROXY_MODE" == "nginx" ]]; then
         if systemctl is-active nginx &>/dev/null; then
-            log "nginx — работает"
+            log "nginx - работает"
         else
-            warn "nginx — не запущен"
+            warn "nginx - не запущен"
             all_ok=false
         fi
     else
         if docker ps --format '{{.Names}}' | grep -q "^matrix-traefik$"; then
-            log "Traefik — работает"
+            log "Traefik - работает"
         else
-            warn "Traefik — не запущен"
+            warn "Traefik - не запущен"
             all_ok=false
         fi
     fi
@@ -703,7 +731,6 @@ health_check() {
     echo "    cd ${PLAYBOOK_ROOT} && just run-tags self-check"
 }
 
-
 # =============================================================================
 # Синхронизация TLS-сертификатов (nginx режим)
 # =============================================================================
@@ -716,7 +743,7 @@ sync_tls_certs() {
 
     local cert_dir="/etc/letsencrypt/live/${MATRIX_DOMAIN}"
     if [[ ! -f "${cert_dir}/fullchain.pem" ]]; then
-        info "Certbot-серты не найдены (Traefik-only режим?) — пропуск"
+        info "Certbot-серты не найдены (Traefik-only режим?) - пропуск"
         return 0
     fi
 
@@ -771,7 +798,6 @@ sync_tls_certs() {
     fi
 }
 
-
 # =============================================================================
 # Проверка vars.yml на конфликты приоритетов traefik
 # =============================================================================
@@ -797,12 +823,12 @@ check_vars_sanity() {
         companion_priority=$(_vars_yml "matrix_synapse_reverse_proxy_companion_container_labels_public_client_api_traefik_priority")
         companion_priority="${companion_priority:-0}"
 
-        if (( companion_priority == 0 )); then
+        if ((companion_priority == 0)); then
             warn "Federation на entrypoint web, но companion priority не задан"
             warn "Traefik не сможет разрешить конфликт маршрутов"
             info "Добавляю: companion priority = 1000"
             if [[ "$DRY_RUN" != true ]]; then
-                cat >> "$vars_file" <<'PATCHEOF'
+                cat >>"$vars_file" <<'PATCHEOF'
 
 # [auto-patch] Companion priority: federation и client API на одном entrypoint
 matrix_synapse_reverse_proxy_companion_container_labels_public_client_api_traefik_priority: 1000
@@ -813,7 +839,7 @@ PATCHEOF
         fi
 
         # --- 2. Companion priority > 0, media-repo включён, но media-repo priority не задан ---
-        if (( companion_priority > 0 )); then
+        if ((companion_priority > 0)); then
             local media_enabled
             media_enabled=$(_vars_yml "matrix_media_repo_enabled")
 
@@ -822,13 +848,13 @@ PATCHEOF
                 media_priority=$(_vars_yml "matrix_media_repo_container_labels_traefik_media_priority")
                 media_priority="${media_priority:-0}"
 
-                if (( media_priority == 0 )); then
+                if ((media_priority == 0)); then
                     warn "Companion priority=${companion_priority}, но media-repo priority не задан"
                     warn "Запросы /_matrix/media будут уходить в Synapse (где media_repo отключён) → 404"
-                    local target_priority=$(( companion_priority + 1000 ))
+                    local target_priority=$((companion_priority + 1000))
                     info "Добавляю: media-repo priority = ${target_priority}"
                     if [[ "$DRY_RUN" != true ]]; then
-                        cat >> "$vars_file" <<PATCHEOF
+                        cat >>"$vars_file" <<PATCHEOF
 
 # [auto-patch] Media-repo приоритеты (выше companion ${companion_priority}, иначе media 404)
 matrix_media_repo_container_labels_traefik_media_priority: ${target_priority}
@@ -845,10 +871,10 @@ PATCHEOF
                     fi
                     ((issues++))
 
-                elif (( media_priority <= companion_priority )); then
+                elif ((media_priority <= companion_priority)); then
                     warn "media-repo priority (${media_priority}) <= companion priority (${companion_priority})"
                     warn "Media запросы будут перехвачены companion → 404"
-                    local target_priority=$(( companion_priority + 1000 ))
+                    local target_priority=$((companion_priority + 1000))
                     info "Исправляю: media-repo priority → ${target_priority}"
                     if [[ "$DRY_RUN" != true ]]; then
                         sed -i "s/\(matrix_media_repo_container_labels_traefik_.*_priority:\).*/\1 ${target_priority}/" "$vars_file"
@@ -859,13 +885,12 @@ PATCHEOF
         fi
     fi
 
-    if (( issues == 0 )); then
+    if ((issues == 0)); then
         log "Конфликтов не обнаружено"
     else
         log "Исправлено проблем: ${issues}"
     fi
 }
-
 
 # =============================================================================
 # Главная логика
@@ -874,7 +899,7 @@ PATCHEOF
 main() {
     echo ""
     echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${BOLD}  Matrix Server — обновление${NC}"
+    echo -e "${BOLD}  Matrix Server - обновление${NC}"
     echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
     echo ""
 
@@ -911,21 +936,21 @@ main() {
         warn "Бэкап пропущен (--skip-backup)"
     fi
 
-    # Если только бэкап — выходим
+    # Если только бэкап - выходим
     if [[ "$BACKUP_ONLY" == true ]]; then
         echo ""
         log "Бэкап завершён"
         exit 0
     fi
 
-    # Если только синхронизация сертов — делаем и выходим
+    # Если только синхронизация сертов - делаем и выходим
     if [[ "$SYNC_CERTS_ONLY" == true ]]; then
         detect_domain
         detect_proxy_mode
         if [[ "$PROXY_MODE" == "nginx" ]]; then
             sync_tls_certs
         else
-            info "Traefik-only режим — синхронизация сертов не нужна"
+            info "Traefik-only режим - синхронизация сертов не нужна"
         fi
         exit 0
     fi
@@ -978,9 +1003,9 @@ main() {
             echo -e "  ${BOLD}Сервисы:${NC}"
             echo -e "    Element Web:    https://element.${MATRIX_DOMAIN}/"
             echo -e "    Synapse API:    https://${MATRIX_HOSTNAME}/_matrix/client/versions"
-            [[ -n "$SYNAPSE_ADMIN_URL" ]] && \
+            [[ -n "$SYNAPSE_ADMIN_URL" ]] &&
                 echo -e "    Admin Panel:  ${SYNAPSE_ADMIN_URL}"
-            [[ -n "$ELEMENT_ADMIN_URL" ]] && \
+            [[ -n "$ELEMENT_ADMIN_URL" ]] &&
                 echo -e "    Element Admin:  ${ELEMENT_ADMIN_URL}"
         fi
     fi

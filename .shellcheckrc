@@ -1,0 +1,13 @@
+# Tell shellcheck that scripts may be sourced from /usr/share or /opt
+external-sources=true
+
+# Scripts are designed for bash; don't recommend POSIX-only constructs.
+shell=bash
+
+# Don't fail the build on info-level hints.
+# CI uses `shellcheck -S error` which already filters these out for the gate.
+# Locally, `shellcheck` shows info so devs can clean up incrementally.
+severity=warning
+
+# Allow `cd ... && ...` patterns used throughout the kit.
+disable=SC1091

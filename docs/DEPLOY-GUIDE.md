@@ -1,15 +1,15 @@
-# Matrix Server — Пошаговый гайд по развёртыванию
+# Matrix Server - Пошаговый гайд по развёртыванию
 
 ## Что ты получишь
 
 Полноценный Matrix-сервер с:
-- **Synapse** — сервер обмена сообщениями (федерация с другими серверами)
-- **Element Web** — веб-клиент (как Telegram Web, только свой)
-- **Аудио/видео звонки** — через LiveKit (WebRTC)
-- **Push-уведомления** — через ntfy (без Google)
-- **Admin-панели** — Ketesa + Element Admin
-- **Мосты** — Telegram, WhatsApp, Signal, Discord и другие
-- **Боты** — модерация, вебхуки, поддержка
+- **Synapse** - сервер обмена сообщениями (федерация с другими серверами)
+- **Element Web** - веб-клиент (как Telegram Web, только свой)
+- **Аудио/видео звонки** - через LiveKit (WebRTC)
+- **Push-уведомления** - через ntfy (без Google)
+- **Admin-панели** - Ketesa + Element Admin
+- **Мосты** - Telegram, WhatsApp, Signal, Discord и другие
+- **Боты** - модерация, вебхуки, поддержка
 
 ---
 
@@ -60,10 +60,10 @@ dig SRV _matrix-fed._tcp.example.com
 ```
 
 > **Нюансы**:
-> - SRV заменяет только серверный discovery (федерация). Клиентский discovery (`.well-known/matrix/client`) SRV **не заменяет** — пользователи должны вводить `matrix.example.com` при логине вручную.
-> - SRV-запись публична — `dig` покажет что на домене Matrix. Для полного скрытия это не поможет.
+> - SRV заменяет только серверный discovery (федерация). Клиентский discovery (`.well-known/matrix/client`) SRV **не заменяет** - пользователи должны вводить `matrix.example.com` при логине вручную.
+> - SRV-запись публична - `dig` покажет что на домене Matrix. Для полного скрытия это не поможет.
 
-> **Важно**: `example.com` — это твой bare-домен. Matrix ID пользователей будет `@user:example.com`.
+> **Важно**: `example.com` - это твой bare-домен. Matrix ID пользователей будет `@user:example.com`.
 
 ---
 
@@ -108,7 +108,7 @@ bash /root/matrix-deploy-kit/deploy.sh
 | 11 | Безопасность | Federation на 443, DPI |
 | 12 | Итоги | Сводка + команды |
 
-На каждом шаге — подсказки и значения по умолчанию. Просто жми Enter для рекомендуемых значений.
+На каждом шаге - подсказки и значения по умолчанию. Просто жми Enter для рекомендуемых значений.
 
 ---
 
@@ -211,12 +211,12 @@ docker exec matrix-synapse \
 ## Шаг 8. Проверка
 
 Открой в браузере:
-- `https://element.example.com` — веб-клиент (войди как admin)
-- `https://matrix.example.com:35805` — Ketesa (если настроил)
-- `https://matrix.example.com:35122` — Element Admin (если настроил)
+- `https://element.example.com` - веб-клиент (войди как admin)
+- `https://matrix.example.com:35805` - Ketesa (если настроил)
+- `https://matrix.example.com:35122` - Element Admin (если настроил)
 
 Проверка федерации:
-- https://federationtester.matrix.org — введи свой домен
+- https://federationtester.matrix.org - введи свой домен
 
 ---
 
@@ -233,7 +233,7 @@ bash tools/update.sh
 - Запустит `just install-all`
 - Синхронизирует TLS-серты для LiveKit/Coturn (nginx-режим)
 - Проверит что все контейнеры живы
-- При ошибке — откатит автоматически
+- При ошибке - откатит автоматически
 
 Только синхронизация сертов (без обновления):
 ```bash
@@ -251,7 +251,7 @@ bash tools/backup.sh                  # разовый снимок в /root/bac
 bash tools/backup.sh --install-cron   # ежедневно в 03:00
 ```
 
-`/root/backups` намеренно вне тома `/matrix` — дамп переживёт порчу данных. Off-site
+`/root/backups` намеренно вне тома `/matrix` - дамп переживёт порчу данных. Off-site
 (`rsync`/`rclone`) настрой сам. При провале дампа скрипт выходит с кодом 1 (для cron).
 
 Восстановление из снимка:
@@ -266,8 +266,8 @@ bash tools/restore.sh /root/backups/20260620-030000 --dry-run
 Скрипт остановит сервисы, поднимет postgres, импортирует дамп в работающий
 `matrix-postgres` и поднимет всё обратно.
 
-- На **свежеразвёрнутый** сервер (БД ещё пустые) — обычный `restore.sh --latest`.
-- Если **postgres уже с данными** — без `--clean` дамп ляжет поверх (merge →
+- На **свежеразвёрнутый** сервер (БД ещё пустые) - обычный `restore.sh --latest`.
+- Если **postgres уже с данными** - без `--clean` дамп ляжет поверх (merge →
   конфликты). `--clean` дропает целевые БД (имена берутся из дампа) перед заливкой,
   давая чистую замену.
 

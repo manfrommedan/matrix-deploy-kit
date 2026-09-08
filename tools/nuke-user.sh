@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Matrix Server — полное удаление пользователя
+# Matrix Server - полное удаление пользователя
 # =============================================================================
 # Удаляет пользователя ПОЛНОСТЬЮ: сообщения, медиа, аккаунт, сессии.
 #
@@ -30,11 +30,15 @@ DIM='\033[2m'
 NC='\033[0m'
 
 # --- Вывод ---
-log()     { echo -e "${GREEN}[+]${NC} $*"; }
-warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
-err()     { echo -e "${RED}[x]${NC} $*" >&2; }
-info()    { echo -e "${BLUE}[i]${NC} $*"; }
-step()    { echo ""; echo -e "${BOLD}${CYAN}--- $* ---${NC}"; echo ""; }
+log() { echo -e "${GREEN}[+]${NC} $*"; }
+warn() { echo -e "${YELLOW}[!]${NC} $*"; }
+err() { echo -e "${RED}[x]${NC} $*" >&2; }
+info() { echo -e "${BLUE}[i]${NC} $*"; }
+step() {
+    echo ""
+    echo -e "${BOLD}${CYAN}--- $* ---${NC}"
+    echo ""
+}
 
 # --- Параметры ---
 DRY_RUN=false
@@ -46,11 +50,23 @@ MATRIX_DATA_PATH="/matrix"
 # --- Парсинг аргументов ---
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --dry-run|-n)        DRY_RUN=true; shift ;;
-        --force|-f)          FORCE=true; shift ;;
-        --keep-messages)     KEEP_MESSAGES=true; shift ;;
-        --data-path)         MATRIX_DATA_PATH="$2"; shift 2 ;;
-        -h|--help)
+        --dry-run | -n)
+            DRY_RUN=true
+            shift
+            ;;
+        --force | -f)
+            FORCE=true
+            shift
+            ;;
+        --keep-messages)
+            KEEP_MESSAGES=true
+            shift
+            ;;
+        --data-path)
+            MATRIX_DATA_PATH="$2"
+            shift 2
+            ;;
+        -h | --help)
             echo "Использование: nuke-user.sh <username> [ОПЦИИ]"
             echo ""
             echo "Полностью удаляет пользователя с сервера."
@@ -98,7 +114,6 @@ if [[ -z "$USERNAME" ]]; then
     exit 1
 fi
 
-
 # =============================================================================
 # Подготовка
 # =============================================================================
@@ -110,7 +125,7 @@ check_deps() {
             missing+=("$cmd")
         fi
     done
-    if (( ${#missing[@]} > 0 )); then
+    if ((${#missing[@]} > 0)); then
         err "Не найдены зависимости: ${missing[*]}"
         exit 1
     fi
@@ -134,7 +149,7 @@ get_server_name() {
 }
 
 detect_synapse_url() {
-    # Получаем IP контейнера из Docker-сети — самый надёжный способ
+    # Получаем IP контейнера из Docker-сети - самый надёжный способ
     SYNAPSE_URL=""
     SYNAPSE_HOST=""
 
@@ -190,12 +205,12 @@ get_admin_token() {
         return 0
     fi
 
-    # Стратегия 2: MAS — issue-compatibility-token через mas-cli
+    # Стратегия 2: MAS - issue-compatibility-token через mas-cli
     local mas_container
     mas_container=$(docker ps --format '{{.Names}}' | grep -m1 'authentication-service') || true
 
     if [[ -n "$mas_container" ]]; then
-        warn "Токен не найден в БД — пробую через MAS..."
+        warn "Токен не найден в БД - пробую через MAS..."
 
         # Находим admin в MAS (can_request_admin = true)
         local mas_admin
@@ -234,8 +249,8 @@ get_admin_token() {
 
     local config="${MATRIX_DATA_PATH}/synapse/config/homeserver.yaml"
     local shared_secret
-    shared_secret=$(grep '^registration_shared_secret:' "$config" 2>/dev/null \
-        | head -1 | sed 's/^registration_shared_secret:[[:space:]]*//' | tr -d "\"'") || true
+    shared_secret=$(grep '^registration_shared_secret:' "$config" 2>/dev/null |
+        head -1 | sed 's/^registration_shared_secret:[[:space:]]*//' | tr -d "\"'") || true
 
     if [[ -n "$shared_secret" ]]; then
         local tmp_user="_nuke_admin_${RANDOM}"
@@ -249,8 +264,8 @@ get_admin_token() {
 
         if [[ -n "$nonce" ]]; then
             local mac
-            mac=$(printf '%s\0%s\0%s\0%s' "$nonce" "$tmp_user" "$tmp_pass" "admin" \
-                | openssl dgst -sha1 -hmac "$shared_secret" | awk '{print $NF}')
+            mac=$(printf '%s\0%s\0%s\0%s' "$nonce" "$tmp_user" "$tmp_pass" "admin" |
+                openssl dgst -sha1 -hmac "$shared_secret" | awk '{print $NF}')
 
             local reg_result
             reg_result=$(curl -s -m 5 "${SYNAPSE_URL}/_synapse/admin/v1/register" \
@@ -324,13 +339,12 @@ synapse_api() {
     fi
 }
 
-
 # =============================================================================
 # Действия
 # =============================================================================
 
 resolve_user_id() {
-    # Принимает username или @username:domain — возвращает полный MXID
+    # Принимает username или @username:domain - возвращает полный MXID
     if [[ "$USERNAME" == @* ]]; then
         USER_ID="$USERNAME"
     else
@@ -346,7 +360,7 @@ resolve_user_id() {
         exit 1
     fi
 
-    USER_DISPLAYNAME=$(echo "$user_info" | jq -r '.displayname // "—"')
+    USER_DISPLAYNAME=$(echo "$user_info" | jq -r '.displayname // "-"')
     USER_DEACTIVATED=$(echo "$user_info" | jq -r '.deactivated // false')
     USER_ADMIN=$(echo "$user_info" | jq -r '.admin // false')
     # USER_CREATION_TS используется в расширенном выводе (при отладке)
@@ -437,17 +451,17 @@ redact_messages_in_room() {
         while IFS= read -r event_id; do
             [[ -z "$event_id" ]] && continue
 
-            # Admin redact — не требует быть в комнате
+            # Admin redact - не требует быть в комнате
             synapse_api POST "/_synapse/admin/v1/rooms/${room_id}/redact/${event_id}" \
                 '{"reason": "User account purged"}' >/dev/null 2>&1 || true
 
             ((redacted++)) || true
 
             # Прогресс каждые 50 сообщений
-            if (( redacted % 50 == 0 )); then
+            if ((redacted % 50 == 0)); then
                 echo -ne "\r    ${DIM}Удалено сообщений: ${redacted}...${NC}"
             fi
-        done <<< "$events"
+        done <<<"$events"
 
         # Следующая страница
         from=$(echo "$messages" | jq -r '.end // empty' 2>/dev/null)
@@ -457,13 +471,13 @@ redact_messages_in_room() {
 
         ((batch++))
         # Защита от бесконечного цикла
-        if (( batch > 1000 )); then
+        if ((batch > 1000)); then
             warn "  Слишком много страниц, остановка"
             break
         fi
     done
 
-    if (( redacted > 0 )); then
+    if ((redacted > 0)); then
         echo -ne "\r"
         log "  Удалено сообщений: ${redacted}"
     fi
@@ -488,13 +502,13 @@ redact_all_messages() {
         ((room_num++))
         info "[${room_num}/${USER_ROOM_COUNT}]"
         redact_messages_in_room "$room_id"
-    done <<< "$USER_ROOMS"
+    done <<<"$USER_ROOMS"
 }
 
 delete_media() {
     step "Удаление медиафайлов"
 
-    if (( USER_MEDIA_COUNT == 0 )); then
+    if ((USER_MEDIA_COUNT == 0)); then
         info "Медиафайлов нет"
         return 0
     fi
@@ -541,7 +555,7 @@ kick_from_rooms() {
         }
 
         ((kicked++)) || true
-    done <<< "$USER_ROOMS"
+    done <<<"$USER_ROOMS"
 
     log "Кикнут из ${kicked} комнат"
 }
@@ -572,7 +586,7 @@ remove_from_mas() {
 
     # Проверяем есть ли MAS
     if ! docker ps --format '{{.Names}}' | grep -q '^matrix-authentication-service$'; then
-        info "MAS не запущен — пропуск"
+        info "MAS не запущен - пропуск"
         return 0
     fi
 
@@ -589,12 +603,12 @@ remove_from_mas() {
     local mas_cli="${MATRIX_DATA_PATH}/matrix-authentication-service/bin/mas-cli"
 
     if [[ -x "$mas_cli" ]]; then
-        "$mas_cli" manage kill-sessions "${localpart}" 2>/dev/null && \
-            log "Сессии MAS удалены" || \
+        "$mas_cli" manage kill-sessions "${localpart}" 2>/dev/null &&
+            log "Сессии MAS удалены" ||
             warn "Не удалось удалить сессии MAS"
 
-        "$mas_cli" manage lock-user "${localpart}" --deactivate 2>/dev/null && \
-            log "Пользователь заблокирован и деактивирован в MAS" || \
+        "$mas_cli" manage lock-user "${localpart}" --deactivate 2>/dev/null &&
+            log "Пользователь заблокирован и деактивирован в MAS" ||
             warn "Не удалось заблокировать в MAS"
     else
         warn "mas-cli не найден: $mas_cli"
@@ -654,8 +668,8 @@ purge_from_db() {
                 DELETE FROM compat_sessions WHERE user_id = '${mas_uid}';
                 -- Пользователь (CASCADE: user_emails, user_terms, user_unsupported_third_party_ids)
                 DELETE FROM users WHERE user_id = '${mas_uid}';
-            " 2>/dev/null && \
-                log "MAS: запись удалена" || \
+            " 2>/dev/null &&
+                log "MAS: запись удалена" ||
                 warn "MAS: не удалось удалить (возможно уже удалена)"
         else
             info "MAS: пользователь не найден в БД"
@@ -667,7 +681,7 @@ purge_from_db() {
     syn_localpart="${syn_localpart%%:*}"
     info "Purge Synapse: ${USER_ID} (localpart: ${syn_localpart})"
 
-    # Некоторые таблицы хранят MXID, некоторые — localpart
+    # Некоторые таблицы хранят MXID, некоторые - localpart
     $pg_cmd synapse -q -c "
         DELETE FROM erased_users WHERE user_id = '${USER_ID}';
         DELETE FROM devices WHERE user_id = '${USER_ID}';
@@ -692,11 +706,10 @@ purge_from_db() {
         DELETE FROM user_filters WHERE user_id = '${syn_localpart}';
         -- Запись пользователя
         DELETE FROM users WHERE name = '${USER_ID}';
-    " 2>/dev/null && \
-        log "Synapse: запись удалена" || \
+    " 2>/dev/null &&
+        log "Synapse: запись удалена" ||
         warn "Synapse: не удалось удалить (возможно уже удалена)"
 }
-
 
 # =============================================================================
 # Главная логика
@@ -705,7 +718,7 @@ purge_from_db() {
 main() {
     echo ""
     echo -e "${BOLD}${RED}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${BOLD}  Matrix Server — ПОЛНОЕ УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ${NC}"
+    echo -e "${BOLD}  Matrix Server - ПОЛНОЕ УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ${NC}"
     echo -e "${BOLD}${RED}═══════════════════════════════════════════════════════════${NC}"
     echo ""
 
@@ -739,9 +752,9 @@ main() {
         [[ -n "${SYNAPSE_HOST}" ]] && args+=(-H "Host: ${SYNAPSE_HOST}")
 
         case "$method" in
-            GET)    curl "${args[@]}" 2>/dev/null ;;
-            POST)   curl "${args[@]}" -d "$data" 2>/dev/null ;;
-            PUT)    curl "${args[@]}" -X PUT -d "$data" 2>/dev/null ;;
+            GET) curl "${args[@]}" 2>/dev/null ;;
+            POST) curl "${args[@]}" -d "$data" 2>/dev/null ;;
+            PUT) curl "${args[@]}" -X PUT -d "$data" 2>/dev/null ;;
             DELETE) curl "${args[@]}" -X DELETE 2>/dev/null ;;
         esac
     }
@@ -778,7 +791,7 @@ main() {
     if [[ "$KEEP_MESSAGES" != true ]]; then
         echo -e "    ${RED}✗${NC} Redact всех сообщений в ${USER_ROOM_COUNT} комнатах"
     else
-        echo -e "    ${DIM}— Сообщения сохранены (--keep-messages)${NC}"
+        echo -e "    ${DIM}- Сообщения сохранены (--keep-messages)${NC}"
     fi
     echo -e "    ${RED}✗${NC} Удаление ${USER_MEDIA_COUNT} медиафайлов"
     echo -e "    ${RED}✗${NC} Кик из ${USER_ROOM_COUNT} комнат"
