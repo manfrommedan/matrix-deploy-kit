@@ -614,6 +614,8 @@ class ExpireBot:
             json.dump(data, f)
             f.flush()
             os.fsync(f.fileno())
+        # Внутри access_token — не даём читать другим локальным пользователям
+        os.chmod(tmp, 0o600)
         os.replace(tmp, path)
         logger.info(f"Session saved (device={device_id})")
 

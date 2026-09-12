@@ -291,6 +291,12 @@ if [[ -z "$DOMAIN" ]]; then
     exit 1
 fi
 
+# --max-upload попадает в nginx client_max_body_size «…${MAX_UPLOAD_SIZE}M»
+if ! [[ "$MAX_UPLOAD_SIZE" =~ ^[1-9][0-9]*$ ]]; then
+    err "--max-upload должен быть положительным целым числом в МБ (по умолчанию 100). Получено: ${MAX_UPLOAD_SIZE}"
+    exit 1
+fi
+
 # Проверка: nginx-only опции не совместимы с --traefik-only
 if [[ "$PROXY_MODE" == "traefik" ]]; then
     if [[ -n "$KETESA_PORT" || -n "$ELEMENT_ADMIN_PORT" ]]; then
@@ -737,6 +743,9 @@ if [[ "$SKIP_NGINX" == false ]]; then
 
     # --- Проверка DNS перед запросом сертификата ---
     MY_IP=$(curl -s --max-time 5 ifconfig.me || echo "")
+    if [[ -z "$MY_IP" ]]; then
+        warn "Не удалось определить внешний IP сервера (ifconfig.me) — проверка DNS будет считаться непроверенной"
+    fi
 
     info "Проверка DNS записей (должны указывать на ${MY_IP:-<этот сервер>}):"
     echo ""
@@ -749,6 +758,10 @@ if [[ "$SKIP_NGINX" == false ]]; then
             DNS_OK=false
         elif [[ -n "$MY_IP" && "$RESOLVED_IP" != "$MY_IP" ]]; then
             echo -e "    ${YELLOW}!${NC} ${d} → ${RESOLVED_IP} (ожидается ${MY_IP})"
+            DNS_OK=false
+        elif [[ -z "$MY_IP" ]]; then
+            # IP сервера неизвестен — совпадение не проверить, не показываем ✓ молча
+            echo -e "    ${YELLOW}!${NC} ${d} → ${RESOLVED_IP} (IP сервера неизвестен, не проверено)"
             DNS_OK=false
         else
             echo -e "    ${GREEN}✓${NC} ${d} → ${RESOLVED_IP}"

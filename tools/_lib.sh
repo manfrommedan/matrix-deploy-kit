@@ -99,7 +99,7 @@ gen_dynamic_port() {
                 fi
             done
             if ((collision)); then
-                ((attempts++))
+                attempts=$((attempts + 1))
                 continue
             fi
         fi

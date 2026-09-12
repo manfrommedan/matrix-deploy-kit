@@ -835,7 +835,7 @@ matrix_synapse_reverse_proxy_companion_container_labels_public_client_api_traefi
 PATCHEOF
                 companion_priority=1000
             fi
-            ((issues++))
+            issues=$((issues + 1))
         fi
 
         # --- 2. Companion priority > 0, media-repo включён, но media-repo priority не задан ---
@@ -869,7 +869,7 @@ matrix_media_repo_container_labels_traefik_admin_federation_priority: ${target_p
 matrix_media_repo_container_labels_traefik_t2bot_federation_priority: ${target_priority}
 PATCHEOF
                     fi
-                    ((issues++))
+                    issues=$((issues + 1))
 
                 elif ((media_priority <= companion_priority)); then
                     warn "media-repo priority (${media_priority}) <= companion priority (${companion_priority})"
@@ -879,7 +879,7 @@ PATCHEOF
                     if [[ "$DRY_RUN" != true ]]; then
                         sed -i "s/\(matrix_media_repo_container_labels_traefik_.*_priority:\).*/\1 ${target_priority}/" "$vars_file"
                     fi
-                    ((issues++))
+                    issues=$((issues + 1))
                 fi
             fi
         fi

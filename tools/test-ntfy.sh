@@ -101,11 +101,11 @@ record() {
         ok) ok "  ✓ $name${detail:+ - $detail}" ;;
         warn)
             warn "  ! $name${detail:+ - $detail}"
-            ((WARNS++))
+            WARNS=$((WARNS + 1))
             ;;
         fail)
             err "  ✗ $name${detail:+ - $detail}"
-            ((ERRORS++))
+            ERRORS=$((ERRORS + 1))
             ;;
     esac
 }

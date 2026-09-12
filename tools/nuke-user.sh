@@ -120,7 +120,8 @@ fi
 
 check_deps() {
     local missing=()
-    for cmd in curl jq docker; do
+    # python3 нужен для экранирования $USER_ID в redact_messages_in_room (строка с quote())
+    for cmd in curl jq docker python3; do
         if ! command -v "$cmd" &>/dev/null; then
             missing+=("$cmd")
         fi
@@ -433,7 +434,8 @@ redact_messages_in_room() {
 
     while true; do
         local params
-        params="dir=b&limit=100&filter=%7B%22senders%22%3A%5B%22$(python3 -c "import urllib.parse; print(urllib.parse.quote('$USER_ID'))")%22%5D%2C%22types%22%3A%5B%22m.room.message%22%5D%7D"
+        # $USER_ID через argv, а не встраивание в python-строку (защита от инъекции при спецсимволах)
+        params="dir=b&limit=100&filter=%7B%22senders%22%3A%5B%22$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$USER_ID")%22%5D%2C%22types%22%3A%5B%22m.room.message%22%5D%7D"
         if [[ -n "$from" ]]; then
             params="${params}&from=${from}"
         fi
@@ -455,7 +457,7 @@ redact_messages_in_room() {
             synapse_api POST "/_synapse/admin/v1/rooms/${room_id}/redact/${event_id}" \
                 '{"reason": "User account purged"}' >/dev/null 2>&1 || true
 
-            ((redacted++)) || true
+            redacted=$((redacted + 1))
 
             # Прогресс каждые 50 сообщений
             if ((redacted % 50 == 0)); then
@@ -469,7 +471,7 @@ redact_messages_in_room() {
             break
         fi
 
-        ((batch++))
+        batch=$((batch + 1))
         # Защита от бесконечного цикла
         if ((batch > 1000)); then
             warn "  Слишком много страниц, остановка"
@@ -499,7 +501,7 @@ redact_all_messages() {
     local room_num=0
     while IFS= read -r room_id; do
         [[ -z "$room_id" ]] && continue
-        ((room_num++))
+        room_num=$((room_num + 1))
         info "[${room_num}/${USER_ROOM_COUNT}]"
         redact_messages_in_room "$room_id"
     done <<<"$USER_ROOMS"

@@ -1459,6 +1459,7 @@ fi
 # Для dry-run пишем во временный файл
 if [[ "$DRY_RUN" == true ]]; then
     OUTPUT_FILE=$(mktemp /tmp/matrix-vars-XXXXXX.yml)
+    trap 'rm -f "${OUTPUT_FILE:-}"' EXIT
 fi
 
 # Убеждаемся что директория существует
@@ -2450,6 +2451,10 @@ traefik_environment_variables: |
   LEGO_DISABLE_CNAME_SUPPORT=true
 VARSEOF
 fi
+
+# vars.yml содержит SECRET_KEY/POSTGRES_PASS/CF-токены — делаем его чужому нечитаемым
+# (600), при этом сам каталог и inventory/hosts оставляем с дефолтными правами
+chmod 600 "$OUTPUT_FILE"
 
 # =============================================================================
 # Генерация hosts (inventory)

@@ -191,12 +191,12 @@ bash /root/matrix-deploy-kit/tools/logrotate-matrix.sh
 | `healthcheck.sh` | Проверка состояния работающего сервера (`--json` для мониторинга) |
 | `test-ntfy.sh` | Диагностика push-доставки (well-known, anonymous publish/subscribe) |
 | `logrotate-matrix.sh` | Установка logrotate-конфига для `/var/log/matrix/`, nginx, certbot |
-| `generate_vars.sh` | Wizard для генерации `vars.yml` (12 секций) |
+| `generate_vars.sh` | Wizard для генерации `vars.yml` (12 секций) + `--env-file`/dry-run |
 | `prepare_server.sh` | Подготовка хоста (Docker, nginx, SSL, firewall) |
 | `update.sh` | Обновление стека (git pull + ansible) |
 | `backup.sh` | Бэкап (`pg_dumpall` + конфиги) |
 | `restore.sh` | Восстановление из снимка |
-| `nuke-user.sh` | Полное удаление пользователя (GDPR) |
+| `nuke-user.sh` | Полное удаление пользователя (GDPR): аккаунт в MAS и Synapse + redact всех его сообщений |
 | `tune-system.sh` | sysctl + ulimit для Synapse |
 | `migrate-to-compose-v2.sh` | Разовая миграция docker-compose v1 → v2 |
 | `_lib.sh` | Общая библиотека (log/warn/die/gen_dynamic_port) |
@@ -283,7 +283,7 @@ security group). В остальных случаях порты нужно от
 ```
 matrix-deploy-kit/
 ├── deploy.sh                       # точка входа (--full или интерактивно)
-├── tools/                          # 14 скриптов (см. таблицу выше)
+├── tools/                          # 13 скриптов (см. таблицу выше)
 ├── templates/                      # landing + /tos + /error
 ├── bots/expire-bot/                # бот авто-экспирации аккаунтов
 ├── docs/                           # 5 .md файлов
