@@ -14,6 +14,9 @@
 #   yes_no <prompt> [default] - да/нет с дефолтом (возвращает 0/1)
 #   require_root       - die если не root
 #   require_cmd <cmd>  - die если команда отсутствует
+#   gen_dynamic_port [min] [max] [used] - случайный свободный порт
+#   vars_check_naming <vars.yml> [--strict] - отлов переменных,
+#       переименованных апстримом плейбука (и опечаток во флагах бриджей)
 # =============================================================================
 
 # Не делать set -u здесь, чтобы скрипт мог подключаться с ужесточённым режимом.
@@ -110,4 +113,52 @@ gen_dynamic_port() {
     # возвращаем хоть какой-то, но это сигнал что диапазон слишком узкий.
     echo "$port"
     return 1
+}
+
+# vars_check_naming <vars.yml> [--strict]
+#
+# Ловит переменные, переименованные апстримом плейбука (иначе: ansible
+# падает на validate_config или - хуже - молча игнорирует переменную,
+# и бридж просто не включается):
+#   matrix_mautrix_*        -> matrix_bridge_mautrix_*          (и остальные бриджи)
+#   ..._account_registration_token_required
+#                           -> ..._account_password_registration_token_required
+# А также предупреждает о неизвестных флагах matrix_bridge_*_enabled
+# (типичная опечатка вроде matrix_bridge_whatsapp_enabled без "mautrix").
+# С --strict старые имена завершают скрипт ошибкой (для pre-deploy проверок).
+vars_check_naming() {
+    local file="$1" strict="${2:-}"
+    [[ -f "$file" ]] || return 0
+
+    local old_prefix_re='^matrix_(mautrix|hookshot|heisenbridge|appservice_(irc|discord)|beeper_linkedin|wechat|sms_bridge|steam_bridge|rustpush_bridge|postmoogle|mx_puppet_(groupme|steam)|meshtastic_relay)_[a-z0-9_]*:'
+    local mas_old_re='^matrix_authentication_service_config_account_registration_token_required:'
+    local -a bad=()
+    local hit
+    while IFS= read -r hit; do bad+=("$hit"); done \
+        < <(grep -nE "$old_prefix_re" "$file" || true)
+    while IFS= read -r hit; do bad+=("$hit"); done \
+        < <(grep -nE "$mas_old_re" "$file" || true)
+
+    if ((${#bad[@]} > 0)); then
+        err "В ${file} найдены переменные со старыми именами:"
+        printf '    %s\n' "${bad[@]}" >&2
+        info "Замена: matrix_<имя>_* -> matrix_bridge_<имя>_*,"
+        info "        ..._account_registration_token_required -> ..._account_password_registration_token_required"
+        if [[ "$strict" == "--strict" ]]; then
+            die "Переименуй переменные в ${file} и повтори"
+        fi
+        warn "Плейбук их проигнорирует или остановится на validate_config"
+    fi
+
+    local known_flag_re='^matrix_bridge_(mautrix_(telegram|discord|whatsapp|signal|slack|meta_instagram|meta_messenger|twitter|googlechat|gmessages|bluesky)|beeper_linkedin|heisenbridge|appservice_(irc|discord)|postmoogle|hookshot|steam|wechat|sms)_enabled$'
+    local flag
+    while IFS= read -r flag; do
+        [[ -z "$flag" ]] && continue
+        # shellcheck disable=SC2076
+        if ! [[ "$flag" =~ $known_flag_re ]]; then
+            warn "'${flag}' в ${file}: неизвестный флаг, похоже на опечатку - ansible его проигнорирует, бридж НЕ включится"
+        fi
+    done < <(sed -n 's/^\(matrix_bridge_[a-z0-9_]*_enabled\):.*/\1/p' "$file")
+
+    return 0
 }

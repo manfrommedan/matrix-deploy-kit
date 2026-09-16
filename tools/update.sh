@@ -37,6 +37,11 @@ step() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLAYBOOK_ROOT=""
 
+# Общая библиотека (vars_check_naming и др.). Идентичные хелперы выше
+# (log/warn/err/info) будут переопределены версиями из _lib.sh - формат тот же.
+# shellcheck source=tools/_lib.sh
+source "${SCRIPT_DIR}/_lib.sh"
+
 # --- Параметры ---
 DRY_RUN=false
 SKIP_BACKUP=false
@@ -922,6 +927,15 @@ main() {
 
     check_inventory
     log "Inventory найден"
+
+    # Имена переменных vars.yml: ловим переименованные апстримом до бэкапа/деплоя
+    local -a vars_files=("${PLAYBOOK_ROOT}"/inventory/host_vars/*/vars.yml)
+    local vf
+    for vf in "${vars_files[@]}"; do
+        [[ -f "$vf" ]] || continue
+        vars_check_naming "$vf" --strict
+    done
+    log "Имена переменных в vars.yml актуальны"
 
     if postgres_running; then
         log "PostgreSQL работает"

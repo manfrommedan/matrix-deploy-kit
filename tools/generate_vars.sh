@@ -2243,6 +2243,15 @@ if [[ ${#SELECTED_BRIDGES[@]} -gt 0 ]]; then
 # -----------------------------------------------------------------------------
 VARSEOF
 
+    # E2EE включён по умолчанию для выбранных мостов:
+    # Matrix-часть переписки шифруется (end-to-bridge), расшифровка только в бридже
+    cat >>"$OUTPUT_FILE" <<'VARSEOF'
+
+# E2EE для бриджей (end-to-bridge)
+matrix_bridges_encryption_enabled: true
+matrix_bridges_encryption_default: true
+VARSEOF
+
     for bridge_name in "${SELECTED_BRIDGES[@]}"; do
         if [[ -n "$bridge_name" ]]; then
             var_name="${BRIDGE_MAP[$bridge_name]:-}"
@@ -2455,6 +2464,9 @@ fi
 # vars.yml содержит SECRET_KEY/POSTGRES_PASS/CF-токены — делаем его чужому нечитаемым
 # (600), при этом сам каталог и inventory/hosts оставляем с дефолтными правами
 chmod 600 "$OUTPUT_FILE"
+
+# Самопроверка: не попали ли в сгенерированный файл переменные, уже переименованные апстримом
+vars_check_naming "$OUTPUT_FILE"
 
 # =============================================================================
 # Генерация hosts (inventory)

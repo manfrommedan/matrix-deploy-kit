@@ -537,6 +537,23 @@ matrix_synapse_workers_preset: little-federation-helper
 
 Мосты позволяют писать из Matrix в другие мессенджеры и наоборот.
 
+### Шифрование (E2EE) для мостов
+
+Включается один раз для всех мостов — Matrix-часть переписки шифруется
+(end-to-bridge: расшифровка происходит в бридже на сервере):
+
+```yaml
+matrix_bridges_encryption_enabled: true
+matrix_bridges_encryption_default: true
+```
+
+- `encryption_enabled` — разрешает шифрование в бридж-порталах;
+- `encryption_default` — новые порталы создаются зашифрованными;
+- на уже созданные комнаты не действует (создаются заново или шифруются вручную).
+
+Шифрование не заменяет WhatsApp/Telegram-протокол: до сервера бриджа сообщение
+всё равно доходит в открытом виде — E2EE защищает только Matrix-сегмент.
+
 ### Telegram
 
 ```yaml
