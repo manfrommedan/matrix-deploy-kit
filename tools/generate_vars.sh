@@ -1122,26 +1122,26 @@ JSON
     echo ""
 
     declare -A BRIDGE_MAP=(
-        ["Telegram (mautrix)"]="matrix_mautrix_telegram_enabled"
-        ["Discord (mautrix)"]="matrix_mautrix_discord_enabled"
-        ["WhatsApp (mautrix)"]="matrix_mautrix_whatsapp_enabled"
-        ["Signal (mautrix)"]="matrix_mautrix_signal_enabled"
-        ["Slack (mautrix)"]="matrix_mautrix_slack_enabled"
-        ["Instagram (mautrix-meta)"]="matrix_mautrix_meta_instagram_enabled"
-        ["Messenger (mautrix-meta)"]="matrix_mautrix_meta_messenger_enabled"
-        ["Twitter (mautrix)"]="matrix_mautrix_twitter_enabled"
-        ["Google Chat (mautrix)"]="matrix_mautrix_googlechat_enabled"
-        ["Google Messages (mautrix)"]="matrix_mautrix_gmessages_enabled"
-        ["Bluesky (mautrix)"]="matrix_mautrix_bluesky_enabled"
-        ["LinkedIn (beeper)"]="matrix_beeper_linkedin_enabled"
-        ["IRC (heisenbridge)"]="matrix_heisenbridge_enabled"
-        ["IRC (appservice)"]="matrix_appservice_irc_enabled"
-        ["Discord (appservice)"]="matrix_appservice_discord_enabled"
-        ["Email (postmoogle)"]="matrix_postmoogle_enabled"
-        ["Hookshot (GitHub/GitLab/JIRA)"]="matrix_hookshot_enabled"
-        ["Steam"]="matrix_steam_bridge_enabled"
-        ["WeChat"]="matrix_wechat_enabled"
-        ["SMS"]="matrix_sms_bridge_enabled"
+        ["Telegram (mautrix)"]="matrix_bridge_mautrix_telegram_enabled"
+        ["Discord (mautrix)"]="matrix_bridge_mautrix_discord_enabled"
+        ["WhatsApp (mautrix)"]="matrix_bridge_mautrix_whatsapp_enabled"
+        ["Signal (mautrix)"]="matrix_bridge_mautrix_signal_enabled"
+        ["Slack (mautrix)"]="matrix_bridge_mautrix_slack_enabled"
+        ["Instagram (mautrix-meta)"]="matrix_bridge_mautrix_meta_instagram_enabled"
+        ["Messenger (mautrix-meta)"]="matrix_bridge_mautrix_meta_messenger_enabled"
+        ["Twitter (mautrix)"]="matrix_bridge_mautrix_twitter_enabled"
+        ["Google Chat (mautrix)"]="matrix_bridge_mautrix_googlechat_enabled"
+        ["Google Messages (mautrix)"]="matrix_bridge_mautrix_gmessages_enabled"
+        ["Bluesky (mautrix)"]="matrix_bridge_mautrix_bluesky_enabled"
+        ["LinkedIn (beeper)"]="matrix_bridge_beeper_linkedin_enabled"
+        ["IRC (heisenbridge)"]="matrix_bridge_heisenbridge_enabled"
+        ["IRC (appservice)"]="matrix_bridge_appservice_irc_enabled"
+        ["Discord (appservice)"]="matrix_bridge_appservice_discord_enabled"
+        ["Email (postmoogle)"]="matrix_bridge_postmoogle_enabled"
+        ["Hookshot (GitHub/GitLab/JIRA)"]="matrix_bridge_hookshot_enabled"
+        ["Steam"]="matrix_bridge_steam_enabled"
+        ["WeChat"]="matrix_bridge_wechat_enabled"
+        ["SMS"]="matrix_bridge_sms_enabled"
     )
 
     BRIDGE_NAMES=(
@@ -2029,7 +2029,7 @@ VARSEOF
 
         if [[ "$MAS_TOKEN_REQUIRED" == true ]]; then
             cat >>"$OUTPUT_FILE" <<VARSEOF
-matrix_authentication_service_config_account_registration_token_required: true
+matrix_authentication_service_config_account_password_registration_token_required: true
 VARSEOF
         fi
     fi
@@ -2225,13 +2225,13 @@ fi
 # Мосты, требующие доп. конфигурации (пишутся закомментированными)
 declare -A BRIDGE_REQUIRES_CONFIG=(
     ["Telegram (mautrix)"]="# Получи api_id и api_hash: https://my.telegram.org/apps
-# matrix_mautrix_telegram_api_id: ''
-# matrix_mautrix_telegram_api_hash: ''"
+# matrix_bridge_mautrix_telegram_api_id: ''
+# matrix_bridge_mautrix_telegram_api_hash: ''"
     ["IRC (appservice)"]="# Настрой IRC-серверы (см. docs/configuring-playbook-bridge-appservice-irc.md)
-# matrix_appservice_irc_ircService_servers: {}"
+# matrix_bridge_appservice_irc_ircService_servers: {}"
     ["Discord (appservice)"]="# Получи client_id и bot_token: https://discord.com/developers/applications
-# matrix_appservice_discord_client_id: ''
-# matrix_appservice_discord_bot_token: ''"
+# matrix_bridge_appservice_discord_client_id: ''
+# matrix_bridge_appservice_discord_bot_token: ''"
 )
 
 if [[ ${#SELECTED_BRIDGES[@]} -gt 0 ]]; then

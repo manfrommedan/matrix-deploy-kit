@@ -148,10 +148,10 @@ matrix_authentication_service_enabled: true
 matrix_authentication_service_config_account_registration_enabled: true
 
 # Обязательный email при регистрации
-matrix_authentication_service_config_account_email_required: true
+matrix_authentication_service_config_account_password_registration_email_required: true
 
 # Регистрация по токенам (invite-only)
-matrix_authentication_service_config_account_registration_token_required: true
+matrix_authentication_service_config_account_password_registration_token_required: true
 
 # ToS - чекбокс при регистрации
 matrix_authentication_service_configuration_extension_yaml: |
@@ -540,11 +540,11 @@ matrix_synapse_workers_preset: little-federation-helper
 ### Telegram
 
 ```yaml
-matrix_mautrix_telegram_enabled: true
+matrix_bridge_mautrix_telegram_enabled: true
 
 # API credentials (получить на https://my.telegram.org/apps):
-matrix_mautrix_telegram_api_id: '12345678'
-matrix_mautrix_telegram_api_hash: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+matrix_bridge_mautrix_telegram_api_id: '12345678'
+matrix_bridge_mautrix_telegram_api_hash: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
 ```
 
 После деплоя: написать `@telegrambot:example.com`, команда `login`.
@@ -552,7 +552,7 @@ matrix_mautrix_telegram_api_hash: 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
 ### WhatsApp
 
 ```yaml
-matrix_mautrix_whatsapp_enabled: true
+matrix_bridge_mautrix_whatsapp_enabled: true
 ```
 
 После деплоя: написать `@whatsappbot:example.com`, команда `login` (QR-код).
@@ -560,7 +560,7 @@ matrix_mautrix_whatsapp_enabled: true
 ### Signal
 
 ```yaml
-matrix_mautrix_signal_enabled: true
+matrix_bridge_mautrix_signal_enabled: true
 ```
 
 После деплоя: написать `@signalbot:example.com`, команда `link`.
@@ -568,7 +568,7 @@ matrix_mautrix_signal_enabled: true
 ### Discord
 
 ```yaml
-matrix_mautrix_discord_enabled: true
+matrix_bridge_mautrix_discord_enabled: true
 ```
 
 После деплоя: написать `@discordbot:example.com`, команда `login`.
@@ -576,43 +576,43 @@ matrix_mautrix_discord_enabled: true
 ### Slack
 
 ```yaml
-matrix_mautrix_slack_enabled: true
+matrix_bridge_mautrix_slack_enabled: true
 ```
 
 ### Instagram
 
 ```yaml
-matrix_mautrix_meta_instagram_enabled: true
+matrix_bridge_mautrix_meta_instagram_enabled: true
 ```
 
 ### Facebook Messenger
 
 ```yaml
-matrix_mautrix_meta_messenger_enabled: true
+matrix_bridge_mautrix_meta_messenger_enabled: true
 ```
 
 ### Google Chat
 
 ```yaml
-matrix_mautrix_googlechat_enabled: true
+matrix_bridge_mautrix_googlechat_enabled: true
 ```
 
 ### LinkedIn
 
 ```yaml
-matrix_beeper_linkedin_enabled: true
+matrix_bridge_beeper_linkedin_enabled: true
 ```
 
 ### Bluesky
 
 ```yaml
-matrix_mautrix_bluesky_enabled: true
+matrix_bridge_mautrix_bluesky_enabled: true
 ```
 
 ### IRC
 
 ```yaml
-matrix_appservice_irc_enabled: true
+matrix_bridge_appservice_irc_enabled: true
 ```
 
 ### Email (Email ↔ Matrix)
@@ -742,7 +742,7 @@ coturn_turn_udp_port: 39521
 
 ```yaml
 # MAS:
-matrix_authentication_service_config_account_registration_token_required: true
+matrix_authentication_service_config_account_password_registration_token_required: true
 
 # Synapse (без MAS):
 matrix_synapse_enable_registration: true
