@@ -41,35 +41,54 @@ DIM='\033[2m'
 NC='\033[0m'
 
 # --- Вывод ---
-log()     { echo -e "${GREEN}[+]${NC} $*"; }
-warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
-err()     { echo -e "${RED}[x]${NC} $*" >&2; }
-info()    { echo -e "${BLUE}[i]${NC} $*"; }
-step()    { echo ""; echo -e "${BOLD}${CYAN}--- $* ---${NC}"; echo ""; }
+log() { echo -e "${GREEN}[+]${NC} $*"; }
+warn() { echo -e "${YELLOW}[!]${NC} $*"; }
+err() { echo -e "${RED}[x]${NC} $*" >&2; }
+info() { echo -e "${BLUE}[i]${NC} $*"; }
+step() {
+    echo ""
+    echo -e "${BOLD}${CYAN}--- $* ---${NC}"
+    echo ""
+}
 
 # --- Параметры ---
 DRY_RUN=false
 FORCE=false
 KEEP_MESSAGES=false
-PURGE=true                  # hard-purge строк/событий из БД + рестарт Synapse
+PURGE=true # hard-purge строк/событий из БД + рестарт Synapse
 USERNAME=""
 MATRIX_DATA_PATH="/matrix"
 IS_MASK=false
 NUKE_USERS=()
-MASK_TOKEN_REVOKED=false   # токен выдан маской, нужно отозвать в конце
-MASK_ADMIN_USER=""         # для кого выдан масочный токен
-UUID=""                    # uuid compat-сессии выданного токена
-DID_PURGE=false            # был ли hard-purge хотя бы на одном юзере
+MASK_TOKEN_REVOKED=false # токен выдан маской, нужно отозвать в конце
+MASK_ADMIN_USER=""       # для кого выдан масочный токен
+UUID=""                  # uuid compat-сессии выданного токена
+DID_PURGE=false          # был ли hard-purge хотя бы на одном юзере
 
 # --- Парсинг аргументов ---
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --dry-run|-n)        DRY_RUN=true; shift ;;
-        --force|-f)          FORCE=true; shift ;;
-        --keep-messages)     KEEP_MESSAGES=true; shift ;;
-        --no-purge)          PURGE=false; shift ;;
-        --data-path)         MATRIX_DATA_PATH="$2"; shift 2 ;;
-        -h|--help)
+        --dry-run | -n)
+            DRY_RUN=true
+            shift
+            ;;
+        --force | -f)
+            FORCE=true
+            shift
+            ;;
+        --keep-messages)
+            KEEP_MESSAGES=true
+            shift
+            ;;
+        --no-purge)
+            PURGE=false
+            shift
+            ;;
+        --data-path)
+            MATRIX_DATA_PATH="$2"
+            shift 2
+            ;;
+        -h | --help)
             echo "Использование: nuke-user.sh <username|mask> [ОПЦИИ]"
             echo ""
             echo "Полностью удаляет пользователя с сервера."
@@ -121,7 +140,6 @@ if [[ -z "$USERNAME" ]]; then
     exit 1
 fi
 
-
 # =============================================================================
 # Подготовка
 # =============================================================================
@@ -133,7 +151,7 @@ check_deps() {
             missing+=("$cmd")
         fi
     done
-    if (( ${#missing[@]} > 0 )); then
+    if ((${#missing[@]} > 0)); then
         err "Не найдены зависимости: ${missing[*]}"
         exit 1
     fi
@@ -288,7 +306,6 @@ synapse_api() {
     fi
 }
 
-
 # =============================================================================
 # Действия
 # =============================================================================
@@ -405,10 +422,10 @@ redact_messages_in_room() {
             ((redacted++)) || true
 
             # Прогресс каждые 50 сообщений
-            if (( redacted % 50 == 0 )); then
+            if ((redacted % 50 == 0)); then
                 echo -ne "\r    ${DIM}Удалено сообщений: ${redacted}...${NC}"
             fi
-        done <<< "$events"
+        done <<<"$events"
 
         # Следующая страница
         from=$(echo "$messages" | jq -r '.end // empty' 2>/dev/null)
@@ -418,13 +435,13 @@ redact_messages_in_room() {
 
         ((batch++))
         # Защита от бесконечного цикла
-        if (( batch > 1000 )); then
+        if ((batch > 1000)); then
             warn "  Слишком много страниц, остановка"
             break
         fi
     done
 
-    if (( redacted > 0 )); then
+    if ((redacted > 0)); then
         echo -ne "\r"
         log "  Удалено сообщений: ${redacted}"
     fi
@@ -449,13 +466,13 @@ redact_all_messages() {
         ((room_num++))
         info "[${room_num}/${USER_ROOM_COUNT}]"
         redact_messages_in_room "$room_id"
-    done <<< "$USER_ROOMS"
+    done <<<"$USER_ROOMS"
 }
 
 delete_media() {
     step "Удаление медиафайлов"
 
-    if (( USER_MEDIA_COUNT == 0 )); then
+    if ((USER_MEDIA_COUNT == 0)); then
         info "Медиафайлов нет"
         return 0
     fi
@@ -502,7 +519,7 @@ kick_from_rooms() {
         }
 
         ((kicked++)) || true
-    done <<< "$USER_ROOMS"
+    done <<<"$USER_ROOMS"
 
     log "Кикнут из ${kicked} комнат"
 }
@@ -551,13 +568,13 @@ remove_from_mas() {
 
     if [[ -x "$mas_cli" ]]; then
         # Убиваем все сессии
-        "$mas_cli" manage kill-sessions "${localpart}" 2>/dev/null && \
-            log "Сессии MAS удалены" || \
+        "$mas_cli" manage kill-sessions "${localpart}" 2>/dev/null &&
+            log "Сессии MAS удалены" ||
             warn "Не удалось удалить сессии MAS"
 
         # Блокируем и деактивируем пользователя
-        "$mas_cli" manage lock-user "${localpart}" --deactivate 2>/dev/null && \
-            log "Пользователь заблокирован и деактивирован в MAS" || \
+        "$mas_cli" manage lock-user "${localpart}" --deactivate 2>/dev/null &&
+            log "Пользователь заблокирован и деактивирован в MAS" ||
             warn "Не удалось заблокировать в MAS"
     else
         warn "mas-cli не найден: $mas_cli"
@@ -566,7 +583,6 @@ remove_from_mas() {
         echo "    mas-cli manage lock-user ${localpart}"
     fi
 }
-
 
 # =============================================================================
 # Маска: glob -> список MXID
@@ -797,9 +813,9 @@ main() {
             -H "Host: matrix.${SERVER_NAME}")
 
         case "$method" in
-            GET)    curl "${args[@]}" 2>/dev/null ;;
-            POST)   curl "${args[@]}" -d "$data" 2>/dev/null ;;
-            PUT)    curl "${args[@]}" -X PUT -d "$data" 2>/dev/null ;;
+            GET) curl "${args[@]}" 2>/dev/null ;;
+            POST) curl "${args[@]}" -d "$data" 2>/dev/null ;;
+            PUT) curl "${args[@]}" -X PUT -d "$data" 2>/dev/null ;;
             DELETE) curl "${args[@]}" -X DELETE 2>/dev/null ;;
         esac
     }
@@ -820,7 +836,7 @@ main() {
         step "Развёртка маски: ${USERNAME}"
         expand_user_mask
 
-        if (( ${#NUKE_USERS[@]} == 0 )); then
+        if ((${#NUKE_USERS[@]} == 0)); then
             info "Маске никто не соответствует (и активные, и деактивные проверены)"
             exit 0
         fi
@@ -829,7 +845,7 @@ main() {
         for u in "${NUKE_USERS[@]}"; do
             echo -e "    ${DIM}${u}${NC}"
         done
-        if (( ${#NUKE_USERS[@]} > 30 )); then
+        if ((${#NUKE_USERS[@]} > 30)); then
             echo -e "    ${DIM}… (список усечён, всего ${#NUKE_USERS[@]})${NC}"
         fi
         echo ""

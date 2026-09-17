@@ -1184,8 +1184,8 @@ JSON
             for adm in $local_admins; do
                 case "$adm" in
                     @*:*) BRIDGE_ADMIN_MXIDS+=("$adm") ;;
-                    *:*)  BRIDGE_ADMIN_MXIDS+=("@${adm}") ;;
-                    *)    BRIDGE_ADMIN_MXIDS+=("@${adm}:${DOMAIN}") ;;
+                    *:*) BRIDGE_ADMIN_MXIDS+=("@${adm}") ;;
+                    *) BRIDGE_ADMIN_MXIDS+=("@${adm}:${DOMAIN}") ;;
                 esac
             done
         fi
