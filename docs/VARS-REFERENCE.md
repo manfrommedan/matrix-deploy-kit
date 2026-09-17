@@ -576,6 +576,22 @@ matrix_bridges_encryption_default: true
 Шифрование не заменяет WhatsApp/Telegram-протокол: до сервера бриджа сообщение
 всё равно доходит в открытом виде — E2EE защищает только Matrix-сегмент.
 
+### Админы мостов
+
+Админ-команды бридж-бота (`delete-all-portals`, релей и др.) доступны только
+пользователям с правом `admin`. Генератор спрашивает админов мостов и пишет
+для каждого mautrix-моста:
+
+```yaml
+matrix_bridge_mautrix_whatsapp_bridge_permissions:
+  '*': relay
+  example.com: user
+  '@nokia:example.com': admin
+```
+
+Важно: только YAML-мапа. Роль отдаёт переменную через `to_json` — строковый
+вариант попадёт в config.yaml quoted-строкой и бридж его не поймёт.
+
 ### Telegram
 
 ```yaml

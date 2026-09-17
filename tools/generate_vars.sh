@@ -1167,6 +1167,7 @@ JSON
         "SMS"
     )
 
+    BRIDGE_ADMIN_MXIDS=()
     mapfile -t SELECTED_BRIDGES < <(ask_multi "Какие мосты включить?" "${BRIDGE_NAMES[@]}")
 
     if [[ ${#SELECTED_BRIDGES[@]} -gt 0 && "${SELECTED_BRIDGES[0]}" != "" ]]; then
@@ -1176,6 +1177,19 @@ JSON
         warn "  сегменты, 'сквозного' шифрования через мост не существует."
         warn "  Не бриджь чувствительные переписки (пиши их напрямую из приложения)"
         warn "  или выноси бридж на железо, которому доверяешь полностью (не VPS)."
+
+        # Админы бриджей: без них недоступны admin-команды бота (delete-all-portals и др.)
+        if ask_yn "Задать админов для мостов (управление бридж-ботами)?" "y"; then
+            local_admins=$(ask "Логины/MXID через пробел (напр.: admin nokia @ops:${DOMAIN})" "admin")
+            for adm in $local_admins; do
+                case "$adm" in
+                    @*:*) BRIDGE_ADMIN_MXIDS+=("$adm") ;;
+                    *:*)  BRIDGE_ADMIN_MXIDS+=("@${adm}") ;;
+                    *)    BRIDGE_ADMIN_MXIDS+=("@${adm}:${DOMAIN}") ;;
+                esac
+            done
+        fi
+        info "Админы бриджей: ${BRIDGE_ADMIN_MXIDS[*]:-нет}"
     fi
 
     # =============================================================================
@@ -2269,6 +2283,24 @@ matrix_bridges_encryption_enabled: true
 matrix_bridges_encryption_default: true
 VARSEOF
 
+    # Пишет блок *_bridge_permissions для mautrix-бриджей.
+    # ВАЖНО: только YAML-мапа - роль отдаёт переменную через to_json,
+    # строковое значение попадёт в конфиг quoted-строкой и бридж его не поймёт.
+    _emit_bridge_permissions() {
+        local var_prefix="$1"
+        {
+            echo ""
+            echo "# Админы бриджа (нужны admin-команды бота: delete-all-portals и др.)"
+            echo "${var_prefix}_bridge_permissions:"
+            echo "  '*': relay"
+            echo "  ${DOMAIN}: user"
+            local mxid
+            for mxid in "${BRIDGE_ADMIN_MXIDS[@]}"; do
+                echo "  '${mxid}': admin"
+            done
+        } >>"$OUTPUT_FILE"
+    }
+
     for bridge_name in "${SELECTED_BRIDGES[@]}"; do
         if [[ -n "$bridge_name" ]]; then
             var_name="${BRIDGE_MAP[$bridge_name]:-}"
@@ -2289,6 +2321,11 @@ VARSEOF
                         echo "# ${bridge_name}"
                         echo "${var_name}: true"
                     } >>"$OUTPUT_FILE"
+                fi
+                # Админы: только у mautrix-бриджей есть переменная *_bridge_permissions.
+                # Пишется и для закомментированных мостов - безвредно, пока бридж выключен.
+                if [[ ${#BRIDGE_ADMIN_MXIDS[@]} -gt 0 && "$var_name" == matrix_bridge_mautrix_* ]]; then
+                    _emit_bridge_permissions "${var_name%_enabled}"
                 fi
             fi
         fi
