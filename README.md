@@ -30,6 +30,8 @@ bash deploy.sh --full --domain example.com --email admin@example.com
 
 1. **Preflight** - DNS-резолв всех поддоменов → IP сервера, проверка портов 80/443.
 2. **Wizard** - 12 секций ответов на ключевые вопросы (брендинг, ntfy, мосты).
+   ⚠️ Мосты: бридж видит маршрутизируемую переписку в открытом виде на сервере
+   (см. раздел «Мосты» в docs/VARS-REFERENCE.md) — понимай, что включаешь.
 3. **Prepare** - Docker, nginx, certbot (SSL на лету), fail2ban, рандомные порты
    для LiveKit/TURN. **ufw опционален** - `--with-firewall` если нужен.
 4. **Ansible** - `just install-all` поднимает Synapse + Postgres + Element Web +
