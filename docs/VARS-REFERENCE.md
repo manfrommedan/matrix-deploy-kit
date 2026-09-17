@@ -83,6 +83,10 @@ matrix_synapse_max_upload_size_mb: 100
 # Предпросмотр ссылок (картинка + заголовок при отправке URL)
 matrix_synapse_url_preview_enabled: true
 
+# Поиск в справочнике пользователей по всем аккаунтам сервера
+# (иначе в поиске людей видны только соседи по комнатам)
+matrix_synapse_user_directory_search_all_users: true
+
 # Статусы "онлайн/оффлайн" (отключение снижает нагрузку)
 matrix_synapse_presence_enabled: true
 

@@ -1739,6 +1739,10 @@ VARSEOF
 if [[ "$URL_PREVIEW" == true ]]; then
     cat >>"$OUTPUT_FILE" <<VARSEOF
 matrix_synapse_url_preview_enabled: true
+
+# Поиск в справочнике пользователей по всем аккаунтам сервера
+# (иначе находятся только те, с кем есть общие комнаты)
+matrix_synapse_user_directory_search_all_users: true
 VARSEOF
 fi
 
