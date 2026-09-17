@@ -1,15 +1,26 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Matrix Server - полное удаление пользователя
+# Matrix Server — полное удаление пользователя
 # =============================================================================
-# Удаляет пользователя ПОЛНОСТЬЮ: сообщения, медиа, аккаунт, сессии.
+# Удаляет пользователя ПОЛНОСТЬЮ: сообщения, медиа, аккаунт, сессии, и затем
+# hard-purge: строку в users + все его события из БД + рестарт Synapse
+# (внутренние кеши). После этого юзер не отображается нигде.
 #
 # Запуск:
 #   bash tools/nuke-user.sh username
 #   bash tools/nuke-user.sh @username:domain.com
-#   bash tools/nuke-user.sh username --dry-run
+#   bash tools/nuke-user.sh '@whatsapp*'            # маска (glob) — всех подходящих
+#   bash tools/nuke-user.sh '@user*' --dry-run
 #   bash tools/nuke-user.sh username --force        # без подтверждения
 #   bash tools/nuke-user.sh username --keep-messages # не редактить сообщения
+#   bash tools/nuke-user.sh username --no-purge     # без hard-purge БД (старое поведение)
+#
+# Маска: символы * и ? как в shell (обязательно в кавычках, иначе shell
+# раскроет glob сам). Пример: nuke-user.sh '@whatsapp*' --force
+#
+# Hard-purge идёт прямым SQL к локальной Synapse БД (postgres контейнер
+# matrix-postgres), имена таблиц ориентированы на Synapse 1.15x+.
+# Это удаляет локальные копии событий/строки; федеративные копии не трогает.
 #
 # Требования:
 #   - root доступ на сервере
@@ -30,54 +41,49 @@ DIM='\033[2m'
 NC='\033[0m'
 
 # --- Вывод ---
-log() { echo -e "${GREEN}[+]${NC} $*"; }
-warn() { echo -e "${YELLOW}[!]${NC} $*"; }
-err() { echo -e "${RED}[x]${NC} $*" >&2; }
-info() { echo -e "${BLUE}[i]${NC} $*"; }
-step() {
-    echo ""
-    echo -e "${BOLD}${CYAN}--- $* ---${NC}"
-    echo ""
-}
+log()     { echo -e "${GREEN}[+]${NC} $*"; }
+warn()    { echo -e "${YELLOW}[!]${NC} $*"; }
+err()     { echo -e "${RED}[x]${NC} $*" >&2; }
+info()    { echo -e "${BLUE}[i]${NC} $*"; }
+step()    { echo ""; echo -e "${BOLD}${CYAN}--- $* ---${NC}"; echo ""; }
 
 # --- Параметры ---
 DRY_RUN=false
 FORCE=false
 KEEP_MESSAGES=false
+PURGE=true                  # hard-purge строк/событий из БД + рестарт Synapse
 USERNAME=""
 MATRIX_DATA_PATH="/matrix"
+IS_MASK=false
+NUKE_USERS=()
+MASK_TOKEN_REVOKED=false   # токен выдан маской, нужно отозвать в конце
+MASK_ADMIN_USER=""         # для кого выдан масочный токен
+UUID=""                    # uuid compat-сессии выданного токена
+DID_PURGE=false            # был ли hard-purge хотя бы на одном юзере
 
 # --- Парсинг аргументов ---
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --dry-run | -n)
-            DRY_RUN=true
-            shift
-            ;;
-        --force | -f)
-            FORCE=true
-            shift
-            ;;
-        --keep-messages)
-            KEEP_MESSAGES=true
-            shift
-            ;;
-        --data-path)
-            MATRIX_DATA_PATH="$2"
-            shift 2
-            ;;
-        -h | --help)
-            echo "Использование: nuke-user.sh <username> [ОПЦИИ]"
+        --dry-run|-n)        DRY_RUN=true; shift ;;
+        --force|-f)          FORCE=true; shift ;;
+        --keep-messages)     KEEP_MESSAGES=true; shift ;;
+        --no-purge)          PURGE=false; shift ;;
+        --data-path)         MATRIX_DATA_PATH="$2"; shift 2 ;;
+        -h|--help)
+            echo "Использование: nuke-user.sh <username|mask> [ОПЦИИ]"
             echo ""
             echo "Полностью удаляет пользователя с сервера."
             echo ""
             echo "Аргументы:"
             echo "  username               Имя пользователя (legion или @legion:domain.com)"
+            echo "  mask                   Маска с * и ? — удалить всех подходящих"
+            echo "                         (обязательно в кавычках): nuke-user.sh '@whatsapp*'"
             echo ""
             echo "Опции:"
             echo "  --dry-run, -n          Показать план без выполнения"
             echo "  --force, -f            Без подтверждения"
-            echo "  --keep-messages        Не редактить сообщения (только удалить аккаунт)"
+            echo "  --keep-messages        Не редактить сообщения (purge тогда тоже не трогает их)"
+            echo "  --no-purge             Не делать hard-purge БД (только deactivate/erase + MAS)"
             echo "  --data-path PATH       Путь к данным Matrix (по умолчанию /matrix)"
             echo "  -h, --help             Справка"
             echo ""
@@ -87,6 +93,7 @@ while [[ $# -gt 0 ]]; do
             echo "  3. Кик из всех комнат"
             echo "  4. Аккаунт в Synapse (deactivate + erase)"
             echo "  5. Аккаунт в MAS (если включён)"
+            echo "  6. Hard-purge: строка в users + все события юзера в Synapse БД"
             echo ""
             echo "Чего нельзя удалить:"
             echo "  - Копии сообщений на чужих федеративных серверах"
@@ -114,19 +121,19 @@ if [[ -z "$USERNAME" ]]; then
     exit 1
 fi
 
+
 # =============================================================================
 # Подготовка
 # =============================================================================
 
 check_deps() {
     local missing=()
-    # python3 нужен для экранирования $USER_ID в redact_messages_in_room (строка с quote())
-    for cmd in curl jq docker python3; do
+    for cmd in curl jq docker; do
         if ! command -v "$cmd" &>/dev/null; then
             missing+=("$cmd")
         fi
     done
-    if ((${#missing[@]} > 0)); then
+    if (( ${#missing[@]} > 0 )); then
         err "Не найдены зависимости: ${missing[*]}"
         exit 1
     fi
@@ -149,40 +156,13 @@ get_server_name() {
     grep '^server_name:' "$config" | awk '{print $2}' | tr -d "\"'"
 }
 
-detect_synapse_url() {
-    # Получаем IP контейнера из Docker-сети - самый надёжный способ
-    SYNAPSE_URL=""
-    SYNAPSE_HOST=""
-
-    local synapse_ip
-    synapse_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' \
-        matrix-synapse 2>/dev/null | awk '{print $1}')
-
-    if [[ -n "$synapse_ip" ]] && curl -sf -o /dev/null -m 3 \
-        "http://${synapse_ip}:8008/_matrix/client/versions" 2>/dev/null; then
-        SYNAPSE_URL="http://${synapse_ip}:8008"
-        info "Synapse: ${synapse_ip}:8008"
-        return 0
-    fi
-
-    # Fallback: Traefik
-    if curl -sf -o /dev/null -m 3 "http://127.0.0.1:81/_matrix/client/versions" \
-        -H "Host: matrix.${SERVER_NAME}" 2>/dev/null; then
-        SYNAPSE_URL="http://127.0.0.1:81"
-        SYNAPSE_HOST="matrix.${SERVER_NAME}"
-        info "Synapse: Traefik (127.0.0.1:81)"
-        return 0
-    fi
-
-    err "Контейнер matrix-synapse не найден или не отвечает"
-    err "Проверьте: docker ps | grep synapse"
-    exit 1
-}
-
 get_admin_token() {
-    # Стратегия 1: access_token из БД (быстро, если admin залогинен)
+    # Получаем access_token существующего admin напрямую из базы данных
+    # Это самый надёжный способ — работает и с MAS, и без
+
     info "Получение admin-токена из базы данных..."
 
+    # Находим admin-пользователя и его токен
     ADMIN_TOKEN=$(docker exec --env-file="${MATRIX_DATA_PATH}/postgres/env-postgres-psql" \
         matrix-postgres \
         psql -h matrix-postgres synapse -t -A \
@@ -191,121 +171,89 @@ get_admin_token() {
             WHERE u.admin = 1
             ORDER BY t.id DESC LIMIT 1;" 2>/dev/null) || true
 
+    # Убираем пробелы
     ADMIN_TOKEN=$(echo "$ADMIN_TOKEN" | tr -d '[:space:]')
 
-    if [[ -n "$ADMIN_TOKEN" ]]; then
-        ADMIN_USER=$(docker exec --env-file="${MATRIX_DATA_PATH}/postgres/env-postgres-psql" \
-            matrix-postgres \
-            psql -h matrix-postgres synapse -t -A \
-            -c "SELECT t.user_id FROM access_tokens t
-                JOIN users u ON t.user_id = u.name
-                WHERE u.admin = 1
-                ORDER BY t.id DESC LIMIT 1;" 2>/dev/null | tr -d '[:space:]') || true
-        info "Используем admin: ${ADMIN_USER}"
-        TEMP_ADMIN=false
-        return 0
+    if [[ -z "$ADMIN_TOKEN" ]]; then
+        info "Нет активных admin-токенов в Synapse — попробуем выдать через MAS"
+        return 1
     fi
 
-    # Стратегия 2: MAS - issue-compatibility-token через mas-cli
-    local mas_container
-    mas_container=$(docker ps --format '{{.Names}}' | grep -m1 'authentication-service') || true
+    ADMIN_USER=$(docker exec --env-file="${MATRIX_DATA_PATH}/postgres/env-postgres-psql" \
+        matrix-postgres \
+        psql -h matrix-postgres synapse -t -A \
+        -c "SELECT t.user_id FROM access_tokens t
+            JOIN users u ON t.user_id = u.name
+            WHERE u.admin = 1
+            ORDER BY t.id DESC LIMIT 1;" 2>/dev/null | tr -d '[:space:]') || true
 
-    if [[ -n "$mas_container" ]]; then
-        warn "Токен не найден в БД - пробую через MAS..."
-
-        # Находим admin в MAS (can_request_admin = true)
-        local mas_admin
-        mas_admin=$(docker exec --env-file="${MATRIX_DATA_PATH}/postgres/env-postgres-psql" \
-            matrix-postgres \
-            psql -h matrix-postgres matrix_authentication_service -t -A \
-            -c "SELECT username FROM users WHERE can_request_admin = true LIMIT 1;" 2>/dev/null | tr -d '[:space:]') || true
-
-        if [[ -n "$mas_admin" ]]; then
-            info "MAS admin: ${mas_admin}"
-
-            # issue-compatibility-token выводит токен в stderr (лог)
-            local mas_output
-            mas_output=$(docker exec "$mas_container" \
-                mas-cli manage issue-compatibility-token \
-                --yes-i-want-to-grant-synapse-admin-privileges \
-                "$mas_admin" 2>&1) || true
-
-            # Токен: mct_... в строке "token issued: mct_xxx"
-            ADMIN_TOKEN=$(echo "$mas_output" | grep -oP 'mct_\S+' | head -1) || true
-
-            if [[ -n "$ADMIN_TOKEN" ]]; then
-                ADMIN_USER="@${mas_admin}:${SERVER_NAME}"
-                TEMP_ADMIN=false
-                log "Токен получен через MAS для ${ADMIN_USER}"
-                return 0
-            fi
-            warn "mas-cli не дал токен: ${mas_output}"
-        else
-            warn "Нет admin-пользователей в MAS"
-        fi
-    fi
-
-    # Стратегия 3: registration_shared_secret (без MAS)
-    warn "Пробую registration_shared_secret..."
-
-    local config="${MATRIX_DATA_PATH}/synapse/config/homeserver.yaml"
-    local shared_secret
-    shared_secret=$(grep '^registration_shared_secret:' "$config" 2>/dev/null |
-        head -1 | sed 's/^registration_shared_secret:[[:space:]]*//' | tr -d "\"'") || true
-
-    if [[ -n "$shared_secret" ]]; then
-        local tmp_user="_nuke_admin_${RANDOM}"
-        local tmp_pass
-        tmp_pass=$(openssl rand -hex 16 2>/dev/null || head -c 32 /dev/urandom | xxd -p | head -c 32)
-
-        local nonce_resp
-        nonce_resp=$(curl -s -m 5 "${SYNAPSE_URL}/_synapse/admin/v1/register") || true
-        local nonce
-        nonce=$(echo "$nonce_resp" | jq -r '.nonce // empty' 2>/dev/null)
-
-        if [[ -n "$nonce" ]]; then
-            local mac
-            mac=$(printf '%s\0%s\0%s\0%s' "$nonce" "$tmp_user" "$tmp_pass" "admin" |
-                openssl dgst -sha1 -hmac "$shared_secret" | awk '{print $NF}')
-
-            local reg_result
-            reg_result=$(curl -s -m 5 "${SYNAPSE_URL}/_synapse/admin/v1/register" \
-                -H "Content-Type: application/json" \
-                -d "{\"nonce\":\"${nonce}\",\"username\":\"${tmp_user}\",\"password\":\"${tmp_pass}\",\"mac\":\"${mac}\",\"admin\":true}") || true
-
-            ADMIN_TOKEN=$(echo "$reg_result" | jq -r '.access_token // empty' 2>/dev/null)
-
-            if [[ -n "$ADMIN_TOKEN" ]]; then
-                ADMIN_USER="@${tmp_user}:${SERVER_NAME}"
-                TEMP_ADMIN=true
-                TEMP_ADMIN_USER="$ADMIN_USER"
-                log "Создан временный admin: ${ADMIN_USER}"
-                return 0
-            fi
-        fi
-    fi
-
-    # Все стратегии исчерпаны
-    err "Не удалось получить admin-токен"
-    err "Стратегия 1 (БД): нет токенов в access_tokens"
-    [[ -n "$mas_container" ]] && err "Стратегия 2 (MAS): mas-cli issue-compatibility-token не дал результат"
-    err "Стратегия 3 (register API): endpoint отключён или недоступен"
-    err ""
-    err "Решение: залогиньтесь в Element Web как admin, затем попробуйте снова"
-    exit 1
-
-    ADMIN_USER="@${tmp_user}:${SERVER_NAME}"
-    TEMP_ADMIN=true
-    TEMP_ADMIN_USER="$ADMIN_USER"
-    log "Создан временный admin: ${ADMIN_USER}"
+    info "Используем admin: ${ADMIN_USER}"
 }
 
 cleanup_admin() {
-    if [[ "${TEMP_ADMIN:-false}" == true && -n "${TEMP_ADMIN_USER:-}" && -n "${ADMIN_TOKEN:-}" ]]; then
-        info "Удаление временного admin ${TEMP_ADMIN_USER}..."
-        synapse_api POST "/_synapse/admin/v1/deactivate/${TEMP_ADMIN_USER}" \
-            '{"erase": true}' >/dev/null 2>&1 || true
-        log "Временный admin удалён"
+    # Ничего не нужно — мы используем существующий токен, не создаём временного пользователя
+    :
+}
+
+# --- Токен через MAS (fallback, если в Synapse нет активных admin-сессий) ---
+get_mas_admin_token() {
+    local mas_cli="${MATRIX_DATA_PATH}/matrix-authentication-service/bin/mas-cli"
+    if [[ ! -x "$mas_cli" ]]; then
+        info "mas-cli не найден (${mas_cli})"
+        return 1
+    fi
+
+    info "Нет активных admin-сессий в Synabase — выдаю compat-токен через mas-cli..."
+
+    # Админов берём из Synapse БД (там источник правды по ур. правам)
+    MASK_ADMIN_USER=$(docker exec --env-file="${MATRIX_DATA_PATH}/postgres/env-postgres-psql" \
+        matrix-postgres \
+        psql -h matrix-postgres synapse -t -A \
+        -c "SELECT name FROM users WHERE admin = 1 AND name LIKE '@%' LIMIT 1;" 2>/dev/null) || true
+    MASK_ADMIN_USER=$(echo "$MASK_ADMIN_USER" | tr -d '[:space:]')
+
+    local localpart="${MASK_ADMIN_USER#@}"
+    localpart="${localpart%%:*}"
+    if [[ -z "$localpart" ]]; then
+        info "Не найден ни один admin в Synapse БД"
+        return 1
+    fi
+
+    local out
+    if ! out=$("$mas_cli" manage issue-compatibility-token "$localpart" \
+        --yes-i-want-to-grant-synapse-admin-privileges </dev/null 2>&1); then
+        info "mas-cli выдача токена не удалась:"
+        info "  $out"
+        return 1
+    fi
+
+    ADMIN_TOKEN=$(echo "$out" | grep -oE 'mct_[A-Za-z0-9_-]+' | head -1)
+    if [[ -z "$ADMIN_TOKEN" ]]; then
+        info "Токен не распознан в ответе mas-cli:"
+        info "  $out"
+        return 1
+    fi
+
+    # UUID сессии — для точного отзыва токена после
+    local uuid
+    uuid=$(docker exec matrix-postgres psql -U matrix -d matrix_authentication_service -t -A \
+        -c "SELECT compat_session_id FROM compat_access_tokens WHERE access_token = '${ADMIN_TOKEN}';" 2>/dev/null) || true
+    UUID=$(echo "$uuid" | tail -1)
+
+    MASK_TOKEN_REVOKED=true
+    info "Выдан compat-токен admin (пользователь: ${localpart})"
+    return 0
+}
+
+revoke_mask_token() {
+    [[ "$MASK_TOKEN_REVOKED" == true && -n "${UUID:-}" ]] || return 0
+    if docker exec matrix-postgres psql -U matrix -d matrix_authentication_service \
+        -c "DELETE FROM compat_refresh_tokens WHERE compat_session_id = '${UUID}';" \
+        -c "DELETE FROM compat_access_tokens WHERE compat_session_id = '${UUID}';" \
+        -c "DELETE FROM compat_sessions WHERE compat_session_id = '${UUID}';" >/dev/null 2>&1; then
+        info "Compat-токен масочной сессии отозван"
+    else
+        warn "Не отозван токен масочной сессии (uuid: ${UUID}) — убери вручную: DELETE FROM compat_sessions WHERE compat_session_id='${UUID}';"
     fi
 }
 
@@ -340,12 +288,13 @@ synapse_api() {
     fi
 }
 
+
 # =============================================================================
 # Действия
 # =============================================================================
 
 resolve_user_id() {
-    # Принимает username или @username:domain - возвращает полный MXID
+    # Принимает username или @username:domain — возвращает полный MXID
     if [[ "$USERNAME" == @* ]]; then
         USER_ID="$USERNAME"
     else
@@ -361,11 +310,9 @@ resolve_user_id() {
         exit 1
     fi
 
-    USER_DISPLAYNAME=$(echo "$user_info" | jq -r '.displayname // "-"')
+    USER_DISPLAYNAME=$(echo "$user_info" | jq -r '.displayname // "—"')
     USER_DEACTIVATED=$(echo "$user_info" | jq -r '.deactivated // false')
     USER_ADMIN=$(echo "$user_info" | jq -r '.admin // false')
-    # USER_CREATION_TS используется в расширенном выводе (при отладке)
-    # shellcheck disable=SC2034
     USER_CREATION_TS=$(echo "$user_info" | jq -r '.creation_ts // 0')
 
     if [[ "$USER_DEACTIVATED" == "true" ]]; then
@@ -433,9 +380,7 @@ redact_messages_in_room() {
     local batch=0
 
     while true; do
-        local params
-        # $USER_ID через argv, а не встраивание в python-строку (защита от инъекции при спецсимволах)
-        params="dir=b&limit=100&filter=%7B%22senders%22%3A%5B%22$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$USER_ID")%22%5D%2C%22types%22%3A%5B%22m.room.message%22%5D%7D"
+        local params="dir=b&limit=100&filter=%7B%22senders%22%3A%5B%22$(python3 -c "import urllib.parse; print(urllib.parse.quote('$USER_ID'))")%22%5D%2C%22types%22%3A%5B%22m.room.message%22%5D%7D"
         if [[ -n "$from" ]]; then
             params="${params}&from=${from}"
         fi
@@ -453,17 +398,17 @@ redact_messages_in_room() {
         while IFS= read -r event_id; do
             [[ -z "$event_id" ]] && continue
 
-            # Admin redact - не требует быть в комнате
+            # Admin redact — не требует быть в комнате
             synapse_api POST "/_synapse/admin/v1/rooms/${room_id}/redact/${event_id}" \
                 '{"reason": "User account purged"}' >/dev/null 2>&1 || true
 
-            redacted=$((redacted + 1))
+            ((redacted++)) || true
 
             # Прогресс каждые 50 сообщений
-            if ((redacted % 50 == 0)); then
+            if (( redacted % 50 == 0 )); then
                 echo -ne "\r    ${DIM}Удалено сообщений: ${redacted}...${NC}"
             fi
-        done <<<"$events"
+        done <<< "$events"
 
         # Следующая страница
         from=$(echo "$messages" | jq -r '.end // empty' 2>/dev/null)
@@ -471,15 +416,15 @@ redact_messages_in_room() {
             break
         fi
 
-        batch=$((batch + 1))
+        ((batch++))
         # Защита от бесконечного цикла
-        if ((batch > 1000)); then
+        if (( batch > 1000 )); then
             warn "  Слишком много страниц, остановка"
             break
         fi
     done
 
-    if ((redacted > 0)); then
+    if (( redacted > 0 )); then
         echo -ne "\r"
         log "  Удалено сообщений: ${redacted}"
     fi
@@ -501,16 +446,16 @@ redact_all_messages() {
     local room_num=0
     while IFS= read -r room_id; do
         [[ -z "$room_id" ]] && continue
-        room_num=$((room_num + 1))
+        ((room_num++))
         info "[${room_num}/${USER_ROOM_COUNT}]"
         redact_messages_in_room "$room_id"
-    done <<<"$USER_ROOMS"
+    done <<< "$USER_ROOMS"
 }
 
 delete_media() {
     step "Удаление медиафайлов"
 
-    if ((USER_MEDIA_COUNT == 0)); then
+    if (( USER_MEDIA_COUNT == 0 )); then
         info "Медиафайлов нет"
         return 0
     fi
@@ -557,7 +502,7 @@ kick_from_rooms() {
         }
 
         ((kicked++)) || true
-    done <<<"$USER_ROOMS"
+    done <<< "$USER_ROOMS"
 
     log "Кикнут из ${kicked} комнат"
 }
@@ -588,7 +533,7 @@ remove_from_mas() {
 
     # Проверяем есть ли MAS
     if ! docker ps --format '{{.Names}}' | grep -q '^matrix-authentication-service$'; then
-        info "MAS не запущен - пропуск"
+        info "MAS не запущен — пропуск"
         return 0
     fi
 
@@ -605,12 +550,14 @@ remove_from_mas() {
     local mas_cli="${MATRIX_DATA_PATH}/matrix-authentication-service/bin/mas-cli"
 
     if [[ -x "$mas_cli" ]]; then
-        "$mas_cli" manage kill-sessions "${localpart}" 2>/dev/null &&
-            log "Сессии MAS удалены" ||
+        # Убиваем все сессии
+        "$mas_cli" manage kill-sessions "${localpart}" 2>/dev/null && \
+            log "Сессии MAS удалены" || \
             warn "Не удалось удалить сессии MAS"
 
-        "$mas_cli" manage lock-user "${localpart}" --deactivate 2>/dev/null &&
-            log "Пользователь заблокирован и деактивирован в MAS" ||
+        # Блокируем и деактивируем пользователя
+        "$mas_cli" manage lock-user "${localpart}" --deactivate 2>/dev/null && \
+            log "Пользователь заблокирован и деактивирован в MAS" || \
             warn "Не удалось заблокировать в MAS"
     else
         warn "mas-cli не найден: $mas_cli"
@@ -620,97 +567,182 @@ remove_from_mas() {
     fi
 }
 
-purge_from_db() {
-    step "Удаление из баз данных"
 
-    if [[ "$DRY_RUN" == true ]]; then
-        log "DRY-RUN: purge пропущен"
+# =============================================================================
+# Маска: glob -> список MXID
+# =============================================================================
+
+expand_user_mask() {
+    # USERNAME содержит * или ? -> расширяем через LIKE в таблице users.
+    # Запрос идёт через stdin (heredoc) — кавыки полностью под контролем bash,
+    # без магии psql -v (её интерполяция в разных версиях нестабильная).
+    local pat="$USERNAME"
+    # Экранируем литеральные LIKE-специали. standard_conforming_strings=on
+    # (дефолт PG 9.1+), поэтому '\' сам по себе не экранируется — достаточно
+    # экранировать %, _ и одинарную кавычку в SQL-литерале.
+    pat="${pat//\%/\\%}"
+    pat="${pat//_/\\_}"
+    pat="${pat//\'/\'\'}"
+    # glob -> LIKE-паттерн
+    pat="${pat//\*/%}"
+    pat="${pat//\?/_}"
+
+    NUKE_USERS=()
+    while IFS= read -r mxid; do
+        [[ -n "$mxid" ]] && NUKE_USERS+=("$mxid") || true
+    done < <(
+        docker exec -i --env-file="${MATRIX_DATA_PATH}/postgres/env-postgres-psql" \
+            matrix-postgres \
+            psql -h matrix-postgres synapse -t -A <<SQL
+SELECT name FROM users WHERE name LIKE '${pat}' ORDER BY name;
+SQL
+    ) || true
+}
+
+# =============================================================================
+# Hard-purge: вырезает строку пользователя и все его события из Synapse БД.
+# Деактивации/erase по API оставляют строку в users (deactivated) и историю
+# событий — именно это Кетеса/админ-панели потом показывают. Здесь — всё чисто.
+#
+# Делается в одной транзакции с ON_ERROR_STOP: если что-то пошло не так,
+# ничего не удалится. Имена таблиц — под Synapse 1.15x+ (обернуто в проверки).
+# =============================================================================
+
+purge_user_full() {
+    # $1 — полный MXID. Возвращает 0 при успехе, 1 при провале.
+    local user_id="$1"
+
+    if [[ "$PURGE" != true ]]; then
+        info "Hard-purge отключён (--no-purge)"
         return 0
     fi
 
-    local pg_env="--env-file=${MATRIX_DATA_PATH}/postgres/env-postgres-psql"
-    local pg_cmd="docker exec ${pg_env} matrix-postgres psql -h matrix-postgres"
-
-    # --- MAS ---
-    if docker ps --format '{{.Names}}' | grep -q 'authentication-service'; then
-        local mas_uid
-        local localpart="${USER_ID#@}"
-        localpart="${localpart%%:*}"
-        mas_uid=$($pg_cmd matrix_authentication_service -t -A \
-            -c "SELECT user_id FROM users WHERE username = '${localpart}';" 2>/dev/null | tr -d '[:space:]') || true
-
-        if [[ -n "$mas_uid" ]]; then
-            info "Purge MAS: ${localpart} (${mas_uid})"
-
-            # Удаляем снизу вверх по FK-зависимостям:
-            # oauth2_access_tokens → oauth2_sessions → user_sessions → users
-            $pg_cmd matrix_authentication_service -q -c "
-                -- Уровень 3: листья oauth2
-                DELETE FROM oauth2_access_tokens WHERE oauth2_session_id IN (
-                    SELECT oauth2_session_id FROM oauth2_sessions WHERE user_session_id IN (
-                        SELECT user_session_id FROM user_sessions WHERE user_id = '${mas_uid}'));
-                DELETE FROM oauth2_refresh_tokens WHERE oauth2_session_id IN (
-                    SELECT oauth2_session_id FROM oauth2_sessions WHERE user_session_id IN (
-                        SELECT user_session_id FROM user_sessions WHERE user_id = '${mas_uid}'));
-                DELETE FROM oauth2_authorization_grants WHERE oauth2_session_id IN (
-                    SELECT oauth2_session_id FROM oauth2_sessions WHERE user_session_id IN (
-                        SELECT user_session_id FROM user_sessions WHERE user_id = '${mas_uid}'));
-                -- Уровень 2: сессии
-                DELETE FROM oauth2_sessions WHERE user_session_id IN (
-                    SELECT user_session_id FROM user_sessions WHERE user_id = '${mas_uid}');
-                DELETE FROM compat_sessions WHERE user_session_id IN (
-                    SELECT user_session_id FROM user_sessions WHERE user_id = '${mas_uid}');
-                DELETE FROM user_session_authentications WHERE user_session_id IN (
-                    SELECT user_session_id FROM user_sessions WHERE user_id = '${mas_uid}');
-                -- Уровень 1: прямые зависимости users
-                DELETE FROM user_sessions WHERE user_id = '${mas_uid}';
-                DELETE FROM user_passwords WHERE user_id = '${mas_uid}';
-                DELETE FROM upstream_oauth_links WHERE user_id = '${mas_uid}';
-                DELETE FROM personal_sessions WHERE owner_user_id = '${mas_uid}' OR actor_user_id = '${mas_uid}';
-                DELETE FROM compat_sessions WHERE user_id = '${mas_uid}';
-                -- Пользователь (CASCADE: user_emails, user_terms, user_unsupported_third_party_ids)
-                DELETE FROM users WHERE user_id = '${mas_uid}';
-            " 2>/dev/null &&
-                log "MAS: запись удалена" ||
-                warn "MAS: не удалось удалить (возможно уже удалена)"
-        else
-            info "MAS: пользователь не найден в БД"
-        fi
+    if [[ "$DRY_RUN" == true ]]; then
+        log "DRY-RUN: hard-purge ${user_id} пропущен"
+        return 0
     fi
 
-    # --- Synapse ---
-    local syn_localpart="${USER_ID#@}"
-    syn_localpart="${syn_localpart%%:*}"
-    info "Purge Synapse: ${USER_ID} (localpart: ${syn_localpart})"
+    info "Hard-purge БД: ${user_id} (users + events + связки)..."
 
-    # Некоторые таблицы хранят MXID, некоторые - localpart
-    $pg_cmd synapse -q -c "
-        DELETE FROM erased_users WHERE user_id = '${USER_ID}';
-        DELETE FROM devices WHERE user_id = '${USER_ID}';
-        DELETE FROM device_lists_stream WHERE user_id = '${USER_ID}';
-        DELETE FROM device_lists_changes_in_room WHERE user_id = '${USER_ID}';
-        DELETE FROM e2e_cross_signing_keys WHERE user_id = '${USER_ID}';
-        DELETE FROM open_id_tokens WHERE user_id = '${USER_ID}';
-        DELETE FROM user_directory WHERE user_id = '${USER_ID}';
-        DELETE FROM user_directory_search WHERE user_id = '${USER_ID}';
-        DELETE FROM user_ips WHERE user_id = '${USER_ID}';
-        DELETE FROM user_daily_visits WHERE user_id = '${USER_ID}';
-        DELETE FROM user_stats_current WHERE user_id = '${USER_ID}';
-        DELETE FROM presence_stream WHERE user_id = '${USER_ID}';
-        DELETE FROM current_state_delta_stream WHERE state_key = '${USER_ID}';
-        DELETE FROM per_user_experimental_features WHERE user_id = '${USER_ID}';
-        DELETE FROM thread_subscriptions WHERE user_id = '${USER_ID}';
-        DELETE FROM users_to_send_full_presence_to WHERE user_id = '${USER_ID}';
-        DELETE FROM user_signature_stream WHERE from_user_id = '${USER_ID}';
-        DELETE FROM access_tokens WHERE user_id = '${USER_ID}';
-        -- Таблицы с localpart вместо MXID
-        DELETE FROM profiles WHERE user_id = '${syn_localpart}';
-        DELETE FROM user_filters WHERE user_id = '${syn_localpart}';
-        -- Запись пользователя
-        DELETE FROM users WHERE name = '${USER_ID}';
-    " 2>/dev/null &&
-        log "Synapse: запись удалена" ||
-        warn "Synapse: не удалось удалить (возможно уже удалена)"
+    # Экранируем одинарные кавычки для SQL-литерала
+    local esc="${user_id//\'/\'\'}"
+
+    # Весь блок — одна транзакция (BEGIN/COMMIT + ON_ERROR_STOP): любая
+    # ошибка откатит всё. docker exec -i пробрасывает heredoc в psql.
+    echo "--- sql: BEGIN ---" >&2
+    if ! docker exec -i --env-file="${MATRIX_DATA_PATH}/postgres/env-postgres-psql" \
+        matrix-postgres \
+        psql -h matrix-postgres synapse -v ON_ERROR_STOP=1 --no-psqlrc -X -q -t -A <<SQL; then
+BEGIN;
+
+-- 1) Собираем события юзера
+CREATE TEMP TABLE _purge_ev AS
+SELECT event_id, stream_ordering
+FROM events
+WHERE sender = '${esc}';
+
+-- 2) Дочки без каскада
+DELETE FROM event_edges e         USING _purge_ev g WHERE e.event_id = g.event_id OR e.prev_event_id = g.event_id;
+DELETE FROM event_forward_extremities f USING _purge_ev g WHERE f.event_id = g.event_id;
+DELETE FROM partial_state_events p       USING _purge_ev g WHERE p.event_id = g.event_id;
+DELETE FROM partial_state_rooms p        USING _purge_ev g WHERE p.join_event_id = g.event_id;
+DELETE FROM un_partial_stated_event_stream u USING _purge_ev g WHERE u.event_id = g.event_id;
+DELETE FROM current_state_events c       USING _purge_ev g WHERE c.event_id = g.event_id;
+DELETE FROM event_txn_id_device_id t     USING _purge_ev g WHERE t.event_id = g.event_id;
+DELETE FROM sliding_sync_joined_rooms s  USING _purge_ev g WHERE s.event_stream_ordering = g.stream_ordering;
+DELETE FROM sliding_sync_membership_snapshots s USING _purge_ev g
+    WHERE s.event_stream_ordering = g.stream_ordering OR s.membership_event_id = g.event_id;
+DELETE FROM thread_subscriptions t
+    USING _purge_ev g
+    WHERE t.event_id = g.event_id;
+DELETE FROM msc4242_state_dag_forward_extremities m USING _purge_ev g WHERE m.event_id = g.event_id;
+DELETE FROM msc4242_state_dag_edges m
+    USING _purge_ev g
+    WHERE m.event_id = g.event_id OR m.prev_state_event_id = g.event_id;
+DELETE FROM local_current_membership l   USING _purge_ev g WHERE l.event_stream_ordering = g.stream_ordering;
+DELETE FROM room_memberships r           USING _purge_ev g WHERE r.event_stream_ordering = g.stream_ordering;
+
+-- 3) Сами события и их JSON
+DELETE FROM event_json x
+    WHERE x.event_id IN (SELECT event_id FROM _purge_ev);
+DELETE FROM events e
+    WHERE e.event_id IN (SELECT event_id FROM _purge_ev);
+
+-- 4) Юзер-таблицы (FK из users здесь — точечные таблицы)
+DELETE FROM users_to_send_full_presence_to WHERE user_id = '${esc}';
+DELETE FROM per_user_experimental_features WHERE user_id = '${esc}';
+DELETE FROM thread_subscriptions WHERE user_id = '${esc}';
+
+-- 5) Аккаунт
+DELETE FROM users WHERE name = '${esc}';
+
+COMMIT;
+SQL
+        err "Hard-purge ${user_id} сломался (всё в транзакции — откачено)"
+        return 1
+    fi
+
+    log "Hard-purge ${user_id} завершён"
+    DID_PURGE=true
+    return 0
+}
+
+# Перезапуск Synapse если был хоть один hard-purge — иначе API-кеши
+# (list/detail) продолжают отдавать вырезанных юзеров/события.
+restart_synapse_if_needed() {
+    if [[ "$PURGE" != true || "$DRY_RUN" == true || "$DID_PURGE" != true ]]; then
+        return 0
+    fi
+    if ! docker ps --format '{{.Names}}' | grep -q '^matrix-synapse$'; then
+        warn "Контейнер matrix-synapse не найден — перезапусти вручную (иначе кеши)."
+        return 0
+    fi
+    info "Перезапуск matrix-synapse (сброс API-кешей после hard-purge)..."
+    if docker restart matrix-synapse >/dev/null 2>&1; then
+        log "matrix-synapse перезапущен"
+    else
+        warn "Не удалось перезапустить matrix-synapse — сделай вручную!"
+    fi
+}
+
+# =============================================================================
+# Пайплайн удаления ОДНОГО пользователя
+# =============================================================================
+
+nuke_single() {
+    # $1 — полный MXID. Возвращает 0 при успехе, 1 при провале.
+    local user_id="$1"
+    USER_ID="$user_id"
+
+    # Проверяем что пользователь существует
+    local user_info
+    user_info=$(synapse_api GET "/_synapse/admin/v2/users/${USER_ID}" 2>/dev/null) || true
+
+    if [[ -z "$user_info" ]] || echo "$user_info" | jq -e '.errcode' >/dev/null 2>&1; then
+        warn "Пользователь ${USER_ID} не найден (пропущен)"
+        return 1
+    fi
+
+    USER_DISPLAYNAME=$(echo "$user_info" | jq -r '.displayname // "—"')
+    USER_DEACTIVATED=$(echo "$user_info" | jq -r '.deactivated // false')
+    USER_ADMIN=$(echo "$user_info" | jq -r '.admin // false')
+
+    if [[ "$USER_DEACTIVATED" == "true" ]]; then
+        warn "Пользователь уже деактивирован"
+    fi
+
+    get_user_rooms
+    get_user_media
+    get_user_devices
+
+    info "Target: ${USER_ID} (displayname: ${USER_DISPLAYNAME}, rooms: ${USER_ROOM_COUNT})"
+
+    redact_all_messages
+    delete_media
+    kick_from_rooms
+    deactivate_account
+    remove_from_mas
+    purge_user_full "$USER_ID"
 }
 
 # =============================================================================
@@ -720,7 +752,7 @@ purge_from_db() {
 main() {
     echo ""
     echo -e "${BOLD}${RED}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${BOLD}  Matrix Server - ПОЛНОЕ УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ${NC}"
+    echo -e "${BOLD}  Matrix Server — ПОЛНОЕ УДАЛЕНИЕ ПОЛЬЗОВАТЕЛЯ${NC}"
     echo -e "${BOLD}${RED}═══════════════════════════════════════════════════════════${NC}"
     echo ""
 
@@ -733,38 +765,130 @@ main() {
     check_root
     check_deps
 
+    # Определяем режим: одиночный MXID или маска
+    if [[ "$USERNAME" == *\** || "$USERNAME" == *\?* ]]; then
+        IS_MASK=true
+    fi
+
+    # Определяем base URL для API
+    # Пробуем через docker exec напрямую
+    if docker exec matrix-synapse curl -sf http://localhost:8008/_matrix/client/versions >/dev/null 2>&1; then
+        SYNAPSE_BASE="http://localhost:8008"
+        # Все API вызовы пойдут через docker exec? Нет, через docker exec неудобно.
+        # Пробуем через 127.0.0.1:81 (Traefik)
+        :
+    fi
+
     SERVER_NAME=$(get_server_name)
     info "Server name: ${SERVER_NAME}"
 
-    # Автоопределение URL Synapse API
-    detect_synapse_url
+    SYNAPSE_BASE="http://127.0.0.1:81"
 
-    # Переопределяем synapse_api с найденным URL
+    # Переопределяем synapse_api для добавления Host header
     synapse_api() {
         local method="$1"
         local endpoint="$2"
         local data="${3:-}"
-        local url="${SYNAPSE_URL}${endpoint}"
+        local url="http://127.0.0.1:81${endpoint}"
 
         local args=(-sf "$url"
             -H "Authorization: Bearer ${ADMIN_TOKEN}"
-            -H "Content-Type: application/json")
-
-        # Host header нужен только при работе через Traefik
-        [[ -n "${SYNAPSE_HOST}" ]] && args+=(-H "Host: ${SYNAPSE_HOST}")
+            -H "Content-Type: application/json"
+            -H "Host: matrix.${SERVER_NAME}")
 
         case "$method" in
-            GET) curl "${args[@]}" 2>/dev/null ;;
-            POST) curl "${args[@]}" -d "$data" 2>/dev/null ;;
-            PUT) curl "${args[@]}" -X PUT -d "$data" 2>/dev/null ;;
+            GET)    curl "${args[@]}" 2>/dev/null ;;
+            POST)   curl "${args[@]}" -d "$data" 2>/dev/null ;;
+            PUT)    curl "${args[@]}" -X PUT -d "$data" 2>/dev/null ;;
             DELETE) curl "${args[@]}" -X DELETE 2>/dev/null ;;
         esac
     }
 
-    # Получаем admin-токен
-    get_admin_token
-    trap cleanup_admin EXIT
+    # Получаем admin-токен: сначала из живых сессий Synapse, при их
+    # отсутствии — выдаём compat-токен через mas-cli (отзываем в конце)
+    if ! get_admin_token; then
+        if ! get_mas_admin_token; then
+            err "Не найден admin access_token в базе данных"
+            err "Убедитесь что есть хотя бы один admin и (при MAS) запущен контейнер matrix-authentication-service"
+            exit 1
+        fi
+    fi
+    trap 'cleanup_admin; revoke_mask_token' EXIT
 
+    # --- Режим маски ---
+    if [[ "$IS_MASK" == true ]]; then
+        step "Развёртка маски: ${USERNAME}"
+        expand_user_mask
+
+        if (( ${#NUKE_USERS[@]} == 0 )); then
+            info "Маске никто не соответствует (и активные, и деактивные проверены)"
+            exit 0
+        fi
+
+        info "Найдено пользователей: ${#NUKE_USERS[@]}"
+        for u in "${NUKE_USERS[@]}"; do
+            echo -e "    ${DIM}${u}${NC}"
+        done
+        if (( ${#NUKE_USERS[@]} > 30 )); then
+            echo -e "    ${DIM}… (список усечён, всего ${#NUKE_USERS[@]})${NC}"
+        fi
+        echo ""
+        echo -e "  ${BOLD}${RED}Будет выполнено для каждого:${NC}"
+        if [[ "$KEEP_MESSAGES" != true ]]; then
+            echo -e "    ${RED}✗${NC} Redact всех сообщений"
+        fi
+        echo -e "    ${RED}✗${NC} Удаление медиафайлов"
+        echo -e "    ${RED}✗${NC} Кик из комнат"
+        echo -e "    ${RED}✗${NC} Деактивация аккаунта (erase: true)"
+        echo -e "    ${RED}✗${NC} Удаление из MAS"
+        if [[ "$PURGE" == true ]]; then
+            echo -e "    ${RED}✗${NC} Hard-purge БД (users + events) + рестарт Synapse"
+        else
+            echo -e "    ${DIM}— Hard-purge отключён (--no-purge)${NC}"
+        fi
+        echo ""
+
+        if [[ "$DRY_RUN" != true && "$FORCE" != true ]]; then
+            echo -e "  ${BOLD}${RED}ЭТО ДЕЙСТВИЕ НЕОБРАТИМО (для всех ${#NUKE_USERS[@]})!${NC}"
+            echo ""
+            echo -en "  Удалить всех? Введи '${BOLD}DELETE${NC}' для подтверждения: "
+            read -r answer
+            if [[ "$answer" != "DELETE" ]]; then
+                info "Отменено"
+                exit 0
+            fi
+            echo ""
+        fi
+
+        local total=${#NUKE_USERS[@]}
+        local i=0
+        local ok_count=0
+        local fail_count=0
+        for u in "${NUKE_USERS[@]}"; do
+            i=$((i + 1))
+            echo ""
+            step "[${i}/${total}] ${u}"
+            if nuke_single "$u"; then
+                ok_count=$((ok_count + 1))
+            else
+                fail_count=$((fail_count + 1))
+            fi
+        done
+
+        restart_synapse_if_needed
+
+        echo ""
+        echo -e "${BOLD}${RED}═══════════════════════════════════════════════════════════${NC}"
+        if [[ "$DRY_RUN" == true ]]; then
+            echo -e "${BOLD}${YELLOW}  DRY-RUN завершён (ничего не выполнено)${NC}"
+        else
+            echo -e "${BOLD}${GREEN}  Обработано: ${total}, успешно: ${ok_count}, ошибок: ${fail_count}${NC}"
+        fi
+        echo -e "${BOLD}${RED}═══════════════════════════════════════════════════════════${NC}"
+        exit 0
+    fi
+
+    # --- Одиночный режим (как раньше) ---
     # Определяем пользователя
     resolve_user_id
 
@@ -793,13 +917,17 @@ main() {
     if [[ "$KEEP_MESSAGES" != true ]]; then
         echo -e "    ${RED}✗${NC} Redact всех сообщений в ${USER_ROOM_COUNT} комнатах"
     else
-        echo -e "    ${DIM}- Сообщения сохранены (--keep-messages)${NC}"
+        echo -e "    ${DIM}— Сообщения сохранены (--keep-messages)${NC}"
     fi
     echo -e "    ${RED}✗${NC} Удаление ${USER_MEDIA_COUNT} медиафайлов"
     echo -e "    ${RED}✗${NC} Кик из ${USER_ROOM_COUNT} комнат"
     echo -e "    ${RED}✗${NC} Деактивация аккаунта (erase: true)"
     echo -e "    ${RED}✗${NC} Удаление из MAS"
-    echo -e "    ${RED}✗${NC} Purge из баз данных (MAS + Synapse)"
+    if [[ "$PURGE" == true ]]; then
+        echo -e "    ${RED}✗${NC} Hard-purge БД (users + events) + рестарт Synapse"
+    else
+        echo -e "    ${DIM}— Hard-purge отключён (--no-purge)${NC}"
+    fi
     echo ""
 
     # --- Подтверждение ---
@@ -821,7 +949,8 @@ main() {
     kick_from_rooms
     deactivate_account
     remove_from_mas
-    purge_from_db
+    purge_user_full "$USER_ID"
+    restart_synapse_if_needed
 
     # --- Итог ---
     echo ""
