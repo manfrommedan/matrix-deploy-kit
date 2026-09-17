@@ -1180,7 +1180,7 @@ JSON
 
         # Админы бриджей: без них недоступны admin-команды бота (delete-all-portals и др.)
         if ask_yn "Задать админов для мостов (управление бридж-ботами)?" "y"; then
-            local_admins=$(ask "Логины/MXID через пробел (напр.: admin nokia @ops:${DOMAIN})" "admin")
+            local_admins=$(ask "Логины/MXID через пробел (напр.: admin rust @ops:${DOMAIN})" "admin")
             for adm in $local_admins; do
                 case "$adm" in
                     @*:*) BRIDGE_ADMIN_MXIDS+=("$adm") ;;

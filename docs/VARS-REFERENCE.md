@@ -586,7 +586,7 @@ matrix_bridges_encryption_default: true
 matrix_bridge_mautrix_whatsapp_bridge_permissions:
   '*': relay
   example.com: user
-  '@nokia:example.com': admin
+  '@rust:example.com': admin
 ```
 
 Важно: только YAML-мапа. Роль отдаёт переменную через `to_json` — строковый
