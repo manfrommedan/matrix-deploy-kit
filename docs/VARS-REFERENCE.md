@@ -316,6 +316,50 @@ livekit_server_configuration_extension_yaml: |
 > **ВАЖНО**: После рандомизации TURN-портов нужно запустить `setup-traefik` тег,
 > чтобы убрать порт из Traefik entrypoints (конфликт портов).
 
+### ⚠️ AS-режим lk-jwt-service (MSC4512) — ЭКСПЕРИМЕНТАЛЬНАЯ ФИЧА
+
+Новая схема выдачи токенов LiveKit через приложение Synapse (вместо прямого HTTP
+к сервису). Чем отличается/лучше: membership-проверка (токен не отдаётся чужому),
+delayed-leave по webhook'ам (клиент не "застревает" в звонке при обрыве),
+федеративная модель (чужим HS — только restricted). **Старая схема
+(livekit_service_url) остаётся включённой** — новые клиенты берут токен через
+C-S роут `/_matrix/client/unstable/io.element.msc4195/rtc/livekit/get_token`
+(Synapse проксирует в appservice), старые — напрямую HTTP как раньше.
+
+Wizard: ответь "y" на вопрос в секции 5 (Звонки → после портов LiveKit), затем
+после `just install-all` запусти `bash tools/install-livekit-as.sh`.
+Сервер уже развёрнут (wizard не прогонялся) — самодостаточный онбординг:
+`bash tools/livekit-as-setup.sh` (сам патчит vars.yml, ставит registration,
+валидирует nginx, делает `just install-all` и smoke-проверки; откат — `--uninstall`).
+
+```yaml
+matrix_synapse_experimental_features_custom:
+  msc4512_enabled: true
+
+# AS-режим есть с 0.7; latest = mdad сам держит образ свежим
+# (ghcr :latest = 0.7.0 на сегодня; self-build на arm при latest чеканит main)
+matrix_livekit_jwt_service_version: latest
+
+# override целиком (default MDAD = только livekit_service_url → 2 записи)
+matrix_synapse_matrix_rtc_transports:
+  - type: livekit
+    url: "{{ livekit_server_websocket_public_url }}"    # == LIVEKIT_URL в env jwt-service
+    livekit_service_url: "{{ matrix_livekit_jwt_service_public_url }}"
+
+matrix_synapse_app_service_config_files:
+  - /data/lk-as.yaml
+
+matrix_livekit_jwt_service_environment_variables_extension: |
+  LIVEKIT_AS_TOKEN=...32 random bytes...
+  LIVEKIT_HS_TOKEN=...32 random bytes...
+  LIVEKIT_HS_SERVER_NAME={{ matrix_domain }}
+
+livekit_server_path_prefix: /livekit-server   # проектируем как Jinja-ссылку
+```
+
+⚠️ Требования: Synapse v1.161+, lk-jwt-service 0.7+. Подробности и диагностика
+ошибок: `docs/LIVEKIT-AS-MODE-MSC4512.md`.
+
 ---
 
 ## 10. Ketesa

@@ -36,7 +36,11 @@ bash deploy.sh --full --domain example.com --email admin@example.com
    для LiveKit/TURN. **ufw опционален** - `--with-firewall` если нужен.
 4. **Ansible** - `just install-all` поднимает Synapse + Postgres + Element Web +
    LiveKit + ntfy + MAS.
-5. **Создание админа** - в конце выводится готовая команда.
+5. **AS-режим звонков (MSC4512)** - если в wizard ответил `y` на вопрос про
+   AS-режим: deploy pre-seed'ит `lk-as.yaml` до install-all и после него
+   гоняет `tools/install-livekit-as.sh` (см. раздел «AS-режим»). Legacy-звонки
+   при этом не трогает. **ЭКСПЕРИМЕНТАЛЬНАЯ ФИЧА** - можно ответить `n`.
+6. **Создание админа** - в конце выводится готовая команда.
 
 После: заходи на `https://element.example.com` → логин `admin` → работает.
 
@@ -93,7 +97,7 @@ bash deploy.sh --full --domain example.com --email admin@example.com
 | 2/12  | Reverse proxy (nginx / Traefik-only) | nginx |
 | 3/12  | Сеть, SSH-порт, swap | 22, 2G |
 | 4/12  | Регистрация, токены, email | выкл |
-| 5/12  | **Сервисы** (вкл/выкл: LiveKit, ntfy, мосты, **брендинг ntfy**) | лучший режим |
+| 5/12  | **Сервисы** (вкл/выкл: LiveKit, ntfy, мосты, **брендинг ntfy**); при включённых звонках — вопрос про **AS-режим (MSC4512)** | лучший режим |
 | 6/12  | **Element Web** (название, тема, лого, регистрация, footer) | умные дефолты |
 | 7/12  | Мосты (Telegram / WhatsApp / Discord) | выкл |
 | 8/12  | Боты (expire-bot) | выкл |
@@ -118,10 +122,14 @@ bash deploy.sh --full --domain example.com --email admin@example.com
    - **Случайные порты** для LiveKit/TURN/Ketesa/ElementAdmin (выводятся в лог)
    - **ufw firewall** - опционален, включается через `--with-firewall`
      (если не передан - порты открываются в cloud security group, не в iptables)
-3. **Ansible** (~10-20 мин):
-   - `just roles` (загрузка ansible-ролей)
-   - `just install-all` (установка Synapse + Postgres + Element + LiveKit + ntfy + MAS)
-4. **Готово** - вывод "Что дальше" с командой создания админа.
+ 3. **Ansible** (~10-20 мин):
+    - `just roles` (загрузка ansible-ролей)
+    - pre-seed `lk-as.yaml` в synapse config-dir (только если AS-режим включён)
+    - `just install-all` (установка Synapse + Postgres + Element + LiveKit + ntfy + MAS)
+ 4. **AS-режим** - `tools/install-livekit-as.sh` (только если AS-режим включён):
+    сверяет токены, кладёт `lk-as.yaml`, перезапускает synapse + jwt-service,
+    гоняет smoke-проверки.
+ 5. **Готово** - вывод "Что дальше" с командой создания админа.
 
 ## Создать админа (последний шаг)
 
@@ -134,6 +142,56 @@ docker exec matrix-authentication-service \
 ```
 
 > Поменяй `<ПАРОЛЬ>` на свой. Юзер `admin` станет администратором homeserver'а.
+
+---
+
+# AS-режим звонков (lk-jwt-service / MSC4512) — ЭКСПЕРИМЕНТАЛЬНАЯ ФИЧА
+
+Новый (Matrix 2.0) способ выдачи LiveKit-токенов: jwt-сервис регистрируется на
+homeserver как **application service**, клиент берёт токен через роут Synapse
+(`/_matrix/client/unstable/io.element.msc4195/rtc/livekit/get_token`).
+
+Чем лучше старого способа (`livekit_service_url`):
+- сервер проверяет членство в комнате (`is_joined`) — токен не выдадут чужому;
+- `delayed-leave` по webhook'ам LiveKit — клиент не висит в звонке при обрыве;
+- федерация: пользователям с чужих серверов — только `restricted`-доступ;
+- `livekit_service_url` объявлен `deprecated` в Synapse 1.161 — старый путь
+  закроют в будущем.
+
+Минус: поддерживают только клиенты с MSC4512 (свежие Element Call / Element X).
+Старый путь **остаётся включённым параллельно** — старые клиенты живут на нём.
+
+Требования: Synapse `v1.161+` и lk-jwt-service `0.7+` (kit пинит `latest`).
+Детали и диагностика: [docs/LIVEKIT-AS-MODE-MSC4512.md](docs/LIVEKIT-AS-MODE-MSC4512.md).
+
+## Три сценария включения
+
+| Сценарий | Команда | Для кого |
+|----------|---------|----------|
+| **С нуля** через `deploy.sh --full` | В wizard ответить `y` на вопрос про AS-режим — deploy сам pre-seed'ит `lk-as.yaml` до Ansible и гоняет `install-livekit-as.sh` после | новый сервер целиком |
+| **Уже развёрнут** (vars.yml есть, AS не включался) | `bash tools/install-livekit-as.sh` | после добавления AS-блоков в vars.yml (см. [VARS-REFERENCE](docs/VARS-REFERENCE.md)) |
+| **Самодостаточный онбординг** | `bash tools/livekit-as-setup.sh` | любой развёрнутый сервер — сам делает PyYAML-merge vars.yml, кладёт registration и применяет |
+
+`livekit-as-setup.sh` делает всё автоматически и идемпотентно:
+- merge AS-блоков в `vars.yml` через PyYAML (чужие значения не трогает);
+- кладёт `lk-as.yaml` (токены) рядом с `vars.yml` и в synapse config-dir;
+- гоняет `just roles && just install-all`;
+- живые smoke-проверки: `federation/version`, `rtc/transports`, MSC4512-прокси,
+  `Using application service configuration` в логах jwt-сервиса.
+
+Опции: `--dry-run` (только проверки, без root), `--skip-install` (без ansible),
+`--skip-smoke`, `--uninstall` (откат), `-y`.
+
+## Откат (любой сценарий)
+
+```bash
+bash tools/livekit-as-setup.sh --uninstall    # убирает блоки из vars.yml +
+                                              # registration + переустанавливает
+```
+
+После отката звонки через `livekit_service_url` снова работают по-старому.
+`--uninstall` сам убирает блоки из `vars.yml`, удаляет `lk-as.yaml` и
+перезапускает synapse + jwt-service.
 
 ---
 
@@ -201,6 +259,8 @@ bash /root/matrix-deploy-kit/tools/logrotate-matrix.sh
 | `nuke-user.sh` | Полное удаление пользователя (GDPR): аккаунт в MAS и Synapse + redact всех его сообщений |
 | `tune-system.sh` | sysctl + ulimit для Synapse |
 | `migrate-to-compose-v2.sh` | Разовая миграция docker-compose v1 → v2 |
+| `install-livekit-as.sh` | Пост-deploy установка AS-режима звонков: сверка токенов + `lk-as.yaml` + рестарт + smoke |
+| `livekit-as-setup.sh` | Самодостаточный онбординг AS-режима на уже развёрнутый сервер (PyYAML-merge vars.yml, `--uninstall`, `--dry-run`) |
 | `_lib.sh` | Общая библиотека (log/warn/die/gen_dynamic_port) |
 
 ## Обновление
@@ -242,6 +302,7 @@ bash /root/matrix-docker-ansible-deploy/tools/backup.sh
 - [`docs/DEPLOY-GUIDE.md`](docs/DEPLOY-GUIDE.md) - подробное пошаговое руководство
 - [`docs/PERF-TUNING.md`](docs/PERF-TUNING.md) - тюнинг Synapse / Postgres / LiveKit под нагрузку
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) - частые проблемы (включая ntfy push)
+- [`docs/LIVEKIT-AS-MODE-MSC4512.md`](docs/LIVEKIT-AS-MODE-MSC4512.md) - AS-режим lk-jwt-service: чек-лист, MDAD-шпаргалка, откат
 - [`docs/VARS-REFERENCE.md`](docs/VARS-REFERENCE.md) - справочник по всем переменным `vars.yml`
 - [`docs/KNOWN-LIMITATIONS.md`](docs/KNOWN-LIMITATIONS.md) - что kit сознательно не покрывает (RAM-минимумы, media_store, мониторинг, multi-DC)
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) - как контрибьютить
@@ -285,10 +346,10 @@ security group). В остальных случаях порты нужно от
 ```
 matrix-deploy-kit/
 ├── deploy.sh                       # точка входа (--full или интерактивно)
-├── tools/                          # 13 скриптов (см. таблицу выше)
+├── tools/                          # 15 скриптов (см. таблицу выше)
 ├── templates/                      # landing + /tos + /error
 ├── bots/expire-bot/                # бот авто-экспирации аккаунтов
-├── docs/                           # 5 .md файлов
+├── docs/                           # 6 .md файлов
 ├── .github/workflows/ci.yml        # shellcheck + shfmt + py_compile + smoke
 ├── LICENSE                         # MIT
 ├── CHANGELOG.md

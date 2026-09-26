@@ -66,6 +66,35 @@ homeserver = ручная работа.
 Element Web (~50+) - в MADA defaults; если нужна тонкая настройка - правьте
 `inventory/host_vars/matrix.<domain>/vars.yml` руками.
 
+### 10. AS-режим lk-jwt-service (MSC4512) — ЭКСПЕРИМЕНТАЛЬНАЯ ФИЧА
+Wizard умеет включить application-service способ выдачи LiveKit-токенов
+(секция 5, после портов LiveKit). **Статус: экспериментальный / непроверенный** —
+используйте осторожно и держите под рукой откат. Сценарии включения:
+- через wizard `generate_vars.sh` (флаг AS-режима) + `deploy.sh --full`
+  (pre-seed'ит `lk-as.yaml` до `just install-all` и догоняет 6.5-хуком) или
+  вручную: `bash tools/install-livekit-as.sh`;
+- на уже развёрнутый сервер: `bash tools/livekit-as-setup.sh` (сам добавляет
+  блоки в vars.yml через PyYAML-merge, вписывает registration и применяет).
+
+Limitations:
+- Требует Synapse v1.161+ и lk-jwt-service 0.7+ (kit пинит
+  `matrix_livekit_jwt_service_version: latest`).
+- **Окно crash-loop**: `app_service_config_files: [/data/lk-as.yaml]` пишется
+  wizard'ом до install-all, а Synapse на старте делает `open()` на каждый путь
+  (synapse/config/appservice.py: `load_appservices`) — файла нет = ошибка
+  конфига = ретраи. В normal-потоке deploy.sh окно закрыто pre-seed'ом
+  (6.A), в `livekit-as-setup.sh` файлом до install-all (шаг 4). Если ставишь
+  блоки в vars.yml вручную — положи `lk-as.yaml` САМ ДО install-all.
+- Старый способ (livekit_service_url) **остаётся включённым** параллельно,
+  но старые клиенты (до поддержки MSC4512) продолжают ходить напрямую в
+  jwt-service — держите JWT-сервис и его TLS/автентификацию рабочими,
+  полагаясь только на AS.
+- Откат: `bash tools/livekit-as-setup.sh --uninstall` (убирает блоки из
+  vars.yml + registration и переустанавливает) либо вручную: убрать блок из
+  vars.yml + `rm <data_path>/synapse/config/lk-as.yaml` + опять `just install-all`.
+- SMTP/webhook-интеграция delayed-leave требует доп. настройки webhook в LiveKit
+  config (см. `docs/LIVEKIT-AS-MODE-MSC4512.md`, раздел 2.6).
+
 ## RAM-минимумы (для дефолтного набора сервисов)
 
 | Сервисы | RAM минимум | Рекомендуется |

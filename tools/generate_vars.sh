@@ -380,6 +380,16 @@ if [[ -n "${WIZARD_NONINTERACTIVE:-}" || -n "${ENV_FILE:-}" ]]; then
     : "${BRIDGE_NAMES:=}"
     : "${CALLS_ENABLED:=true}"
     : "${ELEMENT_ADMIN_ENABLED:=false}"
+    # AS-режим lk-jwt-service (ЭКСПЕРИМЕНТАЛЬНАЯ ФИЧА) - токены генерируем один раз
+    : "${LIVEKIT_AS_MODE:=false}"
+    : "${LIVEKIT_AS_WS_PATH:=/livekit-server}"
+    if [[ "$LIVEKIT_AS_MODE" == true ]]; then
+        : "${LIVEKIT_AS_TOKEN:=$(openssl rand -hex 32)}"
+        : "${LIVEKIT_HS_TOKEN:=$(openssl rand -hex 32)}"
+    else
+        : "${LIVEKIT_AS_TOKEN:=}"
+        : "${LIVEKIT_HS_TOKEN:=}"
+    fi
     : "${FEDERATION_WHITELIST:=}"
     : "${FEDERATION_BLACKLIST:=}"
     : "${MATRIX_ROOT_REDIRECT:=true}"
@@ -742,6 +752,10 @@ if [[ "${SKIP_WIZARD:-false}" != "true" ]]; then
     LIVEKIT_RTC_UDP=""
     LIVEKIT_TURN_TLS=""
     LIVEKIT_TURN_UDP=""
+    LIVEKIT_AS_MODE=false
+    LIVEKIT_AS_WS_PATH="/livekit-server"
+    LIVEKIT_AS_TOKEN=""
+    LIVEKIT_HS_TOKEN=""
     SYNAPSE_ADMIN=false
     SYNAPSE_ADMIN_PATH=""
     SYNAPSE_ADMIN_PORT=""
@@ -821,6 +835,58 @@ if [[ "${SKIP_WIZARD:-false}" != "true" ]]; then
         echo -e "    ICE/UDP:  ${BOLD}${LIVEKIT_RTC_UDP}${NC}"
         echo -e "    TURN/TLS: ${BOLD}${LIVEKIT_TURN_TLS}${NC}"
         echo -e "    TURN/UDP: ${BOLD}${LIVEKIT_TURN_UDP}${NC}"
+
+        divider
+
+        # --- Application Service режим (MSC4512) - ЭКСПЕРИМЕНТАЛЬНАЯ ФИЧА ---
+        warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        warn "  ЭКСПЕРИМЕНТАЛЬНАЯ ФИЧА - используй осторожно, на свой страх"
+        warn "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        info "${BOLD}Что это:${NC} новый (Matrix 2.0) способ выдачи LiveKit-токенов."
+        info "Jwt-сервис регистрируется на homeserver как application service,"
+        info "и клиент берёт токен через роут Synapse:"
+        info "  /_matrix/client/unstable/io.element.msc4195/rtc/livekit/get_token"
+        echo ""
+        info "${BOLD}Чем отличается ( и чем лучше ) от старого:${NC}"
+        info "  ${GREEN}+${NC} сервер проверяет членство в комнате (is_joined) - токен не отдадут чужому"
+        info "  ${GREEN}+${NC} delayed-leave по webhook'ам LiveKit - клиент не висит в звонке при обрыве"
+        info "  ${GREEN}+${NC} федерация: пользователям с чужих серверов - только restricted-доступ"
+        info "  ${GREEN}+${NC} livekit_service_url объявлен deprecated в Synapse 1.161 - старый выключат"
+        info "    в будущем; новый путь - официальная замена."
+        info "  ${DIM}─${NC} минус: поддерживают только клиенты с MSC4512 (свежие Element Call / Element X)"
+        info "           (остальные продолжают жить на legacy - он НЕ выключается)"
+        echo ""
+        info "Требования: Synapse ${BOLD}v1.161+${NC}, lk-jwt-service ${BOLD}0.7+${NC} (master плейбука на сегодня)."
+        info "Детали и диагностика: docs/LIVEKIT-AS-MODE-MSC4512.md"
+        echo ""
+
+        if ask_yn "Включить AS-режим (msc4512) для новых клиентов?" "n"; then
+            LIVEKIT_AS_MODE=true
+
+            echo ""
+            LIVEKIT_AS_WS_PATH=$(ask "WS-путь LiveKit SFU (относительно matrix.${DOMAIN})" "$LIVEKIT_AS_WS_PATH")
+            LIVEKIT_AS_WS_PATH="${LIVEKIT_AS_WS_PATH%/}"
+            while :; do
+                [[ "$LIVEKIT_AS_WS_PATH" =~ ^/[A-Za-z0-9._/-]+$ && "$LIVEKIT_AS_WS_PATH" != "/" ]] && break
+                err "Невалидный путь: '${LIVEKIT_AS_WS_PATH}'. Ожидается /something[/nested] (без хвостового /)."
+                LIVEKIT_AS_WS_PATH=$(ask "WS-путь LiveKit SFU" "/livekit-server")
+                LIVEKIT_AS_WS_PATH="${LIVEKIT_AS_WS_PATH%/}"
+            done
+
+            if command -v openssl &>/dev/null; then
+                LIVEKIT_AS_TOKEN="$(openssl rand -hex 32)"
+                LIVEKIT_HS_TOKEN="$(openssl rand -hex 32)"
+            else
+                LIVEKIT_AS_TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+                LIVEKIT_HS_TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+            fi
+
+            log "Application Service режим включён"
+            info "  WS-path:  ${BOLD}${LIVEKIT_AS_WS_PATH}${NC}"
+            info "  Токены:   ${BOLD}сгенерированы (32 random bytes)${NC} - пойдут в vars.yml + lk-as.yaml"
+            warn "После install-all: ${BOLD}bash tools/install-livekit-as.sh${NC}"
+        fi
     fi
 
     divider
@@ -1906,6 +1972,85 @@ VARSEOF
 fi
 
 # -----------------------------------------------------------------------------
+# lk-jwt-service AS-режим (MSC4512) — ЭКСПЕРИМЕНТАЛЬНАЯ ФИЧА, используй осторожно
+# -----------------------------------------------------------------------------
+if [[ "${LIVEKIT_AS_MODE:-false}" == true ]]; then
+    cat >>"$OUTPUT_FILE" <<VARSEOF
+
+
+# =============================================================================
+# ⚠️  ЭКСПЕРИМЕНТАЛЬНАЯ ФИЧА: lk-jwt-service Application Service (MSC4512)
+# =============================================================================
+# Старый способ (livekit_service_url) ОСТАЁТСЯ включённым параллельно —
+# откат: убрать этот блок + lk-as.yaml и просто перезапустить install-all.
+# Требования: Synapse v1.161+, lk-jwt-service 0.7+ (master плейбука).
+# Детали: docs/LIVEKIT-AS-MODE-MSC4512.md
+
+# Флаг проксирования C-S → appservice (merge, остальные auto-флаги не трогаем)
+matrix_synapse_experimental_features_custom:
+  msc4512_enabled: true
+
+# AS-режим появился в 0.7; держим latest - mdad сам подтянет свежий образ
+# (ghcr :latest = 0.7.0 на сегодня; self-build на arm при latest чеканит main)
+matrix_livekit_jwt_service_version: latest
+
+# transports: override целиком, иначе MDAD-default создаст ДВЕ livekit-записи
+# (default имеет только livekit_service_url). Здесь - один объект с обоими полями.
+# url: идёт Jinja-ссылкой на ту же переменную, что и LIVEKIT_URL jwt-сервиса -
+# иначе при смене path'а сервис захлопнёт 400 (require_matching_lk_url).
+matrix_synapse_matrix_rtc_transports:
+  - type: livekit
+    url: "{{ livekit_server_websocket_public_url }}"
+    livekit_service_url: "{{ matrix_livekit_jwt_service_public_url }}"
+
+# Registration-файл хранится в ${DATA_PATH}/synapse/config/lk-as.yaml (HOST_DIR),
+# контейнер синапсы видит его как /data/lk-as.yaml (ro-монтаж config-dir).
+matrix_synapse_app_service_config_files:
+  - /data/lk-as.yaml
+
+# Токены в env jwt-контейнера (совпадают с lk-as.yaml - генерируются один раз wizard'ом)
+matrix_livekit_jwt_service_environment_variables_extension: |
+  LIVEKIT_AS_TOKEN=${LIVEKIT_AS_TOKEN}
+  LIVEKIT_HS_TOKEN=${LIVEKIT_HS_TOKEN}
+  LIVEKIT_HS_SERVER_NAME={{ matrix_domain }}
+
+# WS-путь SFU - управляет traefik/webhook_url автоматом (labels.j2, vars:8)
+livekit_server_path_prefix: ${LIVEKIT_AS_WS_PATH}
+VARSEOF
+
+    # Генерируем registration-файл рядом с vars.yml — его потом переносит install-скрипт
+    if [[ "$DRY_RUN" != true ]]; then
+        AS_FILE="$(dirname "$OUTPUT_FILE")/lk-as.yaml"
+        cat >"$AS_FILE" <<ASEOF
+# lk-jwt-service Application Service registration (MSC4512, MSC4502) - ЭКСПЕРИМЕНТАЛЬНАЯ ФИЧА
+# Генерировано: tools/generate_vars.sh
+id: "lk-jwt-service"
+as_token: "${LIVEKIT_AS_TOKEN}"
+hs_token: "${LIVEKIT_HS_TOKEN}"
+sender_localpart: "_lk_jwt_service"
+url: null    # event-traffic не требуется, но ключ обязателен
+
+namespaces:
+  users:
+    - exclusive: false
+      regex: ".*"        # покрыть всех юзеров (is_joined проверка)
+
+# Скоуп: URN должен быть с io.element.msc4502: ВНУТРИ - simple-версия без него
+# кладёт Synapse при старте ("Unknown application service scope", appservice/__init__.py:71)
+io.element.msc4502.scopes:
+  - "urn:matrix:client:io.element.msc4502:rooms:is_joined"
+
+# Только namespace'ные ключи — НЕ namespac'ные proxy_prefix/proxy_url Synapse v1.161
+# игнорирует (appservice.py:233-241)
+io.element.msc4512.proxy_prefix: "rtc/livekit"
+io.element.msc4512.proxy_url: "http://matrix-livekit-jwt-service:8080"
+ASEOF
+        chmod 600 "$AS_FILE"
+        log "registration-файл: ${BOLD}${AS_FILE}${NC}"
+    fi
+fi
+
+# -----------------------------------------------------------------------------
 # Performance tuning (Matrix homeserver + Element X + LiveKit)
 # -----------------------------------------------------------------------------
 # Рекомендованные значения для small/medium homeserver (1-4 CPU, 2-8 GB RAM).
@@ -2760,6 +2905,17 @@ if [[ "$DRY_RUN" != true ]]; then
             echo "           --tags=register-user"
         fi
     fi
+    if [[ "${LIVEKIT_AS_MODE:-false}" == true ]]; then
+        echo ""
+        echo -e "    ${BOLD}${YELLOW}ЭКСПЕРИМЕНТАЛЬНАЯ ФИЧА (MSC4512):${NC} после install-all:"
+        echo "         bash tools/install-livekit-as.sh"
+        echo "       (установит lk-as.yaml в ${DATA_PATH}/synapse/config, провалидит nginx,"
+        echo "        сверит токены и перезапустит synapse)"
+        echo ""
+        echo -e "    Откат AS-режима: remove блок 'ЭКСПЕРИМЕНТАЛЬНАЯ ФИЧА' из vars.yml"
+        echo "       + rm ${DATA_PATH}/synapse/config/lk-as.yaml, потом опять install-all"
+    fi
+
     echo ""
     echo -e "    ${BOLD}Обновление сервера:${NC}"
     echo "         bash tools/update.sh"
