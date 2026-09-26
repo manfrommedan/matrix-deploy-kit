@@ -4,6 +4,22 @@
 
 ### Added
 
+- **AS-режим lk-jwt-service (MSC4512/MSC4502) - звонки через `lk-as.yaml`**
+  (ЭКСПЕРИМЕНТАЛЬНАЯ ФИЧА). Звонки проксируются Synapse'ом на jwt-сервис
+  как Application Service вместо `livekit_service_url` (deprecated в
+  Synapse 1.161). Три сценария:
+  - С нуля: `deploy.sh --full` + `y` на вопрос wizard'а - deploy pre-seed'ит
+    `lk-as.yaml` в synapse config-dir до install-all (Synapse `open()`'ит
+    каждый путь из `app_service_config_files` при старте, файла нет =
+    crash-loop) и гоняет `tools/install-livekit-as.sh` после.
+  - Пост-deploy: `tools/install-livekit-as.sh` (кладёт registration, сверяет
+    токены vars.yml с lk-as.yaml, рестартит сервисы, smoke).
+  - Живой сервер: `tools/livekit-as-setup.sh` - сам добавляет блоки в
+    vars.yml (PyYAML-merge, идемпотентно), генерит/сохраняет токены,
+    применяет через install-all, smoke-проверки; `--uninstall` снимает.
+  Требования: Synapse v1.161+, lk-jwt-service 0.7+ (kit пинит `latest`).
+  Статус/ограничения/откат: `docs/LIVEKIT-AS-MODE-MSC4512.md` +
+  `docs/KNOWN-LIMITATIONS.md` п.10.
 - **`tools/tests/`** - собственный bash test-runner (`run-tests.sh`) без
   внешних зависимостей, совместимый с API bats-core (setup/teardown/test_*,
   assert/assert_eq/assert_fail/assert_contains/skip/pass). 20 unit-тестов
@@ -122,8 +138,9 @@
 
 ### Notes
 
-- 16 shell-скриптов проходят `shellcheck -S error` (gate), `shfmt -d -i 4 -ci`
-  (gate), `bash -n`.
+- 19 shell-скриптов проходят `shellcheck -S error` (gate), `shfmt -d -i 4 -ci`
+  (gate), `bash -n`. Включая `tools/livekit-as-setup.sh` и
+  `tools/install-livekit-as.sh` (AS-режим) - оба под shfmt.
 - 20 unit-тестов проходят (0.5s на этом ноуте). Запуск: `bash tools/tests/run-tests.sh`.
 - 14 тестов на `_lib.sh` (gen_dynamic_port, yes_no, require_cmd, header_text,
   die) + 6 на `preflight.sh` (флаги, валидация, коды возврата).
@@ -133,6 +150,9 @@
 
 ### Known limitations (см. docs/KNOWN-LIMITATIONS.md)
 
+- **AS-режим (MSC4512) - экспериментальная фича**: при ручной установке
+  блоков в vars.yml без pre-seed'а есть окно crash-loop Synapse (см.
+  п.10 KNOWN-LIMITATIONS). В normal-потоке `deploy.sh` окно закрыто.
 - Бэкап `media_store` Synapse пока не автоматизирован (требует target
   для restic/rsync).
 - Нет multi-host/workers поддержки из коробки (MADA поддерживает, kit
