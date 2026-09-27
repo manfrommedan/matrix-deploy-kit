@@ -26,7 +26,7 @@ url: wss://servername
 
 1. `url:` — это НЕ адрес jwt-сервиса, а **WebSocket-адрес самого LiveKit SFU** (`wss://…`). 
    Из docs Synapse (`config_documentation.md`): *"`url` (string): The WebSocket URL of the LiveKit SFU."*
-   Corенный `wss://servername` — клиент дошёл WebSocket'ом до nginx на корне домена, а не до LiveKit → нет рукопожатия → звонок не собирается.
+   В итоге `wss://servername` вёл в nginx на корень домена, а не до LiveKit → нет рукопожатия → звонок не собирается.
 
 2. `livekit_service_url` удалять **нельзя** — deprecated ≠ убрать.
    Из `docs/upgrade.md` v1.161: *"livekit_service_url is now deprecated **but should continue to be listed** to ensure backwards compatibility with older clients."*
@@ -68,7 +68,7 @@ matrix_rtc:
 Пример одного хоста: домен `matrix.example.com`, Synapse в `/etc/matrix-synapse`,
 LiveKit на порт 7880 (127.0.0.1), lk-jwt-service на 127.0.0.1:8080, nginx рядом.
 
-### 2.1. Токены приложенс
+### 2.1. Токены приложения
 
 ```bash
 AS_TOKEN=$(openssl rand -hex 32)
@@ -154,9 +154,9 @@ Restart=always
 WantedBy=multi-user.target
 ```
 
-⚠️ **`LIVEKIT_URL` обязан побуквенно совпадать с `url:` из п. 2.3** — в 0.7 в AS-режиме клиентская
-поля `url` сверяется с этой строкой как текст (`handler.rs:813`, `require_matching_lk_url`),
-любой несовпадение → `400 M_INVALID_PARAM: The request url does not match this service's LiveKit URL`.
+⚠️ **`LIVEKIT_URL` обязан побуквенно совпадать с `url:` из п. 2.3** — в 0.7 AS-режиме клиентское
+поле `url` сверяется с этой строкой как текст (`handler.rs:813`, `require_matching_lk_url`),
+любое несовпадение → `400 M_INVALID_PARAM: The request url does not match this service's LiveKit URL`.
 Никаких внутренних `ws://127.0.0.1:7880` рядом с публичным `wss://` — **один и тот же адрес**,
 публичный, побуквенно. Путь в `url:` — это просто метка маршрута в nginx (п. 2.5), хоть `/livekit-sfu`,
 хоть `/livekit/sfu`, хоть `/banana` — единственное правило: **одна строка в трёх местах**
@@ -198,7 +198,7 @@ webhook:
     - https://matrix.example.com/livekit/jwt/sfu_webhook
 ```
 
-Для работы звонка в моменте НЕ обязательно; без этого не отрабаывается delegated delayed 
+Для работы звонка в моменте НЕ обязательно; без этого не отрабатывается delegated delayed
 leave (MSC4140) — клиент может «зависнуть» в комнате при обрыве. Для прода — желательно.
 
 ### 2.7. Рестарт
@@ -243,8 +243,8 @@ journalctl -u matrix-synapse 2>&1 | grep -iE "appservice|livekit" | tail
 
 ## 4. Шпаргалка при работе через MDAD-плейбука (matrix-docker-ansible-deploy)
 
-Если сервер развёрнут через MDAD (`setup-all`) — правая версия уже в `matrix_synapse_version: v1.161.0`. 
-Но **сам плейбука AS-режима не настраивает** (ни одного `msc4512` в MDAD master на момент проверки).
+Если сервер развёрнут через MDAD (`setup-all`) — нужная версия уже в `matrix_synapse_version: v1.161.0`.
+Но **сам плейбук AS-режима не настраивает** (ни одного `msc4512` в MDAD master на момент проверки).
 Чистый способ добавить через `vars.yml`:
 
 ```yaml
@@ -261,7 +261,7 @@ matrix_livekit_jwt_service_version: latest
 # transports: ПОЛНЫЙ override (не _custom!) - MDAD-default даёт запись с ТОЛЬКО
 # livekit_service_url, добавив переход через custom получим ДВЕ livekit-записи.
 # url: берём Jinja-ссылкой на переменную, из которой MDAD выставляет LIVEKIT_URL
-# (group_vars:6694) - иначе при смене path_ prefix'а они разъедутся (400 при get_token).
+# (group_vars:6694) - иначе при смене path-префикса они разъедутся (400 при get_token).
 matrix_synapse_matrix_rtc_transports:
   - type: livekit
     url: "{{ livekit_server_websocket_public_url }}"
