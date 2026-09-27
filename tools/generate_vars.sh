@@ -330,6 +330,7 @@ if [[ -n "${WIZARD_NONINTERACTIVE:-}" || -n "${ENV_FILE:-}" ]]; then
     : "${ELEMENT_BG_URL:=}"
     : "${ELEMENT_BUG_URL:=}"
     : "${ELEMENT_FOOTER_LINKS:=[]}"
+    : "${ELEMENT_QR_LOGIN:=false}"
     : "${SUBDOMAIN_MATRIX:=matrix.${DOMAIN}}"
     : "${SUBDOMAIN_ELEMENT:=element.${DOMAIN}}"
     : "${SUBDOMAIN_NTFY:=ntfy.${DOMAIN}}"
@@ -1166,6 +1167,19 @@ if [[ "${SKIP_WIZARD:-false}" != "true" ]]; then
         ELEMENT_LAB_SETTINGS=false
     fi
 
+    # QR-логин (MSC4108): «сканируешь QR с залогиненного устройства - и ты вошёл в новом
+    # клиенте без пароля». Требует MAS: у нас включён по умолчанию (секция 4/12).
+    if [[ "$MAS_ENABLED" == true ]]; then
+        if ask_yn "Включить вход по QR-коду (MSC4108, быстрый вход на новом устройстве)?" "y"; then
+            ELEMENT_QR_LOGIN=true
+        else
+            ELEMENT_QR_LOGIN=false
+        fi
+    else
+        info "Вход по QR-коду требует включённый MAS - пропускаю вопрос"
+        ELEMENT_QR_LOGIN=false
+    fi
+
     # Bug report endpoint
     ELEMENT_BUG_URL=$(ask "URL для баг-репортов (пусто - element.io по умолчанию)" "")
     if [[ -n "$ELEMENT_BUG_URL" && ! "$ELEMENT_BUG_URL" =~ ^https?:// ]]; then
@@ -1660,6 +1674,19 @@ fi
 cat >>"$OUTPUT_FILE" <<EOF
 matrix_client_element_branding_auth_footer_links: ${ELEMENT_FOOTER_LINKS}
 EOF
+
+if [[ "$ELEMENT_QR_LOGIN" == true && "$MAS_ENABLED" == true ]]; then
+    # QR-код логин (MSC4108): synapse rendezvous + флаг element-web feature_qr_login.
+    # Требует MAS (validate в роли synapse падает без matrix_authentication_service) —
+    # в визарде MAS_ENABLED=true по умолчанию. Роуты rendezvous доходят через / proxy.
+    cat >>"$OUTPUT_FILE" <<EOF
+
+# QR-код логин (MSC4108): вход "покажи QR ↔ подтверди на залогиненном устройстве"
+matrix_synapse_experimental_features_msc4108_enabled: true
+matrix_client_element_configuration_extension_json: |
+  {"features":{"feature_qr_login": true}}
+EOF
+fi
 
 # Возвращаемся в основной heredoc для остальных секций
 cat >>"$OUTPUT_FILE" <<VARSEOF

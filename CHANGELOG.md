@@ -4,6 +4,19 @@
 
 ### Added
 
+- **`ELEMENT_QR_LOGIN` (MSC4108) - вход в Element Web по QR-коду**. Вопрос в
+  секции 6/12 wizard'а, default y (требует MAS: если MAS выключен, wizard молча
+  ставит false). Эмитит `matrix_synapse_experimental_features_msc4108_enabled: true`
+  + `matrix_client_element_configuration_extension_json: {"features": {"feature_qr_login": true}}`.
+  Роуты rendezvous (`/_matrix/client/(unstable|v1)/org.matrix.msc4108/rendezvous`)
+  доходят до Synapse через существующий `/`-proxy matrix.DOMAIN.
+- **TURN TLS смоук в healthcheck** (`tools/healthcheck.sh --domain X`):
+  где установлены `matrix-livekit-server.service` и/или `matrix-coturn.service`,
+  ждёт TLS на TURN/TLS-порту и проверяет, что серт валидный (не self-signed).
+  Порты берутся из `${PLAYBOOK_ROOT}/inventory/host_vars/.../vars.yml`
+  (livekit = `livekit_server_config_turn_tls_port` (default 5350), coturn =
+  `coturn_container_stun_tls_host_bind_port_tcp` (default 5349)); playbook ищется
+  по `PLAYBOOK_ROOT` (default /root/matrix-docker-ansible-deploy).
 - **AS-режим lk-jwt-service (MSC4512/MSC4502) - звонки через `lk-as.yaml`**
   (ЭКСПЕРИМЕНТАЛЬНАЯ ФИЧА). Звонки проксируются Synapse'ом на jwt-сервис
   как Application Service вместо `livekit_service_url` (deprecated в
@@ -66,8 +79,11 @@
   с рандомизацией), и стандартные порты 7881/7882/5350/3479 оставались закрыты
   при `--with-firewall` без рандома.
 - **healthcheck: смоук TURN TLS** (`:5350` LiveKit и/или `:5349` coturn,
-  в зависимости от того, какие сервисы установлены) - ловит self-signed
-  серты на TURN-портах. Порты читаются из vars.yml, если playbook найден.
+  в зависимости от того, какие сервисы установлены) - ловит self-signed серты
+  на TURN-портах. Порты читаются из vars.yml, если playbook найден.
+  (Позже в этой же сессии: баг `grep -qx` + SIGPIPE + pipefail отлавлен -
+  `grep -q` выходит после match, upstream `systemctl list-unit-files` получает
+  SIGPIPE -> rc=141 под pipefail -> ложный skip.)
 - **Коллизии рандома LiveKit ↔ coturn** - раньше генерация портов coturn
   (10000-59999) не знала о портах LiveKit (10000-49999), входящие в диапазон
   Coturn могли пересечься. Теперь coturn порты генерируются через

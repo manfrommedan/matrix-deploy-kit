@@ -307,12 +307,21 @@ livekit_server_config_turn_udp_port: 13478     # TURN/UDP
 > после `install-all` и рестартит `matrix-livekit-server` / `matrix-coturn`.
 > На живом сервере то же делает `tools/update.sh --sync-certs`.
 >
-> **Миграция с traefik-терминации (external_tls: true → false)**: рестарты
-> сервисов происходят один батчем в конце `install-all`, и traefik к тому
-> моменту уже перерендерен без turn entrypoint. Обычно это значит, что всё
-> поднимается со 2-й попытки автоматического ретрая (отсюда `restart.retry`.
-> Если рестарт исчерпал ретраи и playbook упал на verification — просто
-> перезапусти `just install-all`, конфликт уже точно ушёл.
+> **Миграция с traefik-терминации (external_tls: true → false)**: после
+> записи новых vars в vars.yml прогреви `just install-all` (он re-renderит
+> и livekit, и traefik config, но может решить рестарт не делать).
+> После - обязательно вручную:
+>
+> ```bash
+> systemctl restart matrix-traefik matrix-livekit-server
+> ```
+>
+> Без рестарта traefik продолжит держать хост-порт TURN/TLS (bind conflict
+> у livekit), а livekit не начнёт терминировать TLS. Один install-all
+> рестарт не заказывает: рестарты предназначены per-role через
+> `restart_necessary: False` от devture-списка сервисов - после re-render
+> тот список собран ещё на старых значениях. После ручной пары рестартов
+> повторные install-all идут без необходимых рестартов.
 >
 > **Дефолты портов**: wizard предлагает `TURN/TLS 5350` / `TURN/UDP 3479`
 > (не 5349/3478, как дефолт роли) - 5349/3478 заняты coturn, и group_vars

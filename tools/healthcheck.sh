@@ -256,7 +256,9 @@ check_turn_tls() {
         port="${rest%%:*}"
         label="${rest#*:}"
         # Сервис не установлен (звонки/coturn выключены) - ничего не ждём.
-        systemctl list-unit-files --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "$_svc" || continue
+        # НЕ `grep -qx`: -q выходит после match, upstream systemctl ловит SIGPIPE,
+        # а с pipefail весь пайплайн -> rc=141 -> ложный skip. Читаем поток полностью:
+        systemctl list-unit-files --no-legend 2>/dev/null | awk '{print $1}' | grep -x "$_svc" >/dev/null || continue
         if ! ss -ltnH "sport = :${port}" 2>/dev/null | grep -q LISTEN; then
             record fail "${label}" ":${port} не слушается"
             continue
