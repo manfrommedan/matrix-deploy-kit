@@ -1985,9 +1985,13 @@ VARSEOF
     fi
 
     # TURN/TLS: TLS терминирует сам LiveKit (каноничный режим кита, не traefik).
+    # Только nginx-режим: в traefik-only у нас на хосте нет certbot-сертов
+    # (prepare_server.sh не копирует), и MDAD-дефолт (external_tls: true →
+    # Traefik-ACME терминирует) там и так работает.
     # Серты на хосте в ${DATA_PATH}/livekit-server/certs кладут prepare_server.sh
     # и certbot post-hook (renew → restart matrix-livekit-server).
-    cat >>"$OUTPUT_FILE" <<VARSEOF
+    if [[ "$USE_NGINX" == true ]]; then
+        cat >>"$OUTPUT_FILE" <<VARSEOF
 
 # LiveKit TURN/TLS: external_tls=false → LiveKit сам читает LE-серты из маунта /certs
 livekit_server_config_turn_enabled: true
@@ -1999,6 +2003,7 @@ livekit_server_container_additional_volumes_custom:
     dst: /certs
     options: ro
 VARSEOF
+    fi
 fi
 
 # -----------------------------------------------------------------------------
@@ -2325,8 +2330,11 @@ VARSEOF
     fi
 
     # TURN-over-TLS: kit держит nginx+certbot на хосте, traefik-certs-dumper у нас выключен,
-    # поэтому MDAD-дефолт вычисляет пустые cert-пути — задаём явные (серты кладёт prepare_server.sh)
-    cat >>"$OUTPUT_FILE" <<VARSEOF
+    # поэтому MDAD-дефолт вычисляет пустые cert-пути — задаём явные (серты кладёт prepare_server.sh).
+    # Только nginx-режим: в traefik-only certs-dumper включён сам и дефолт работает,
+    # а ${DATA_PATH}/coturn/certs на хосте нет (prepare_server.sh не копирует).
+    if [[ "$USE_NGINX" == true ]]; then
+        cat >>"$OUTPUT_FILE" <<VARSEOF
 coturn_tls_enabled: true
 coturn_realm: ${SUBDOMAIN_MATRIX}
 coturn_tls_cert_path: /certs/fullchain.pem
@@ -2336,6 +2344,7 @@ coturn_container_additional_volumes:
     dst: /certs
     options: ro
 VARSEOF
+    fi
 fi
 
 # --- ntfy ---
