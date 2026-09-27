@@ -9,8 +9,9 @@
 #   2. Homeserver: /_matrix/federation/v1/version и /_matrix/client/versions
 #   3. PostgreSQL - контейнер жив и принимает соединения
 #   4. Reverse proxy (nginx или Traefik) - порт 443 и ACME
-#   5. Свежесть последнего бэкапа (если есть)
-#   6. Место на диске
+#   5. TURN TLS (LiveKit 5350 / coturn 5349) - ловит self-signed серты
+#   6. Свежесть последнего бэкапа (если есть)
+#   7. Место на диске
 #
 # Использование:
 #   bash tools/healthcheck.sh                # все проверки
@@ -225,6 +226,50 @@ check_proxy() {
     fi
 }
 
+# --- 4.5. TURN TLS (LiveKit + coturn) ---
+# Смоук-ловушка исходной баги: сертификат на порту должен быть LE, не self-signed`ом.
+check_turn_tls() {
+    if ! command -v openssl &>/dev/null || ! command -v ss &>/dev/null; then
+        record warn "turn tls" "openssl/ss не найден - пропускаю"
+        return
+    fi
+    if [[ -z "$DOMAIN" ]]; then
+        record warn "turn tls" "домен не задан (--domain) - пропускаю"
+        return
+    fi
+
+    local _sni="matrix.${DOMAIN}"
+    local _pb="${PLAYBOOK_ROOT:-/root/matrix-docker-ansible-deploy}"
+    local _vars_file="${_pb}/inventory/host_vars/matrix.${DOMAIN}/vars.yml"
+    local lk_port ct_port
+    lk_port="$(awk '/^livekit_server_config_turn_tls_port:/ {sub(/^[^:]+:[[:space:]]*/,""); gsub(/^["'"'"']|["'"'"']$/,""); print; exit}' "$_vars_file" 2>/dev/null | head -1)"
+    ct_port="$(awk '/^coturn_container_stun_tls_host_bind_port_tcp:/ {sub(/^[^:]+:[[:space:]]*/,""); gsub(/^["'"'"']|["'"'"']$/,""); print; exit}' "$_vars_file" 2>/dev/null | head -1)"
+    lk_port="${lk_port:-5350}"
+    ct_port="${ct_port:-5349}"
+
+    local _svc port label rest
+    for spec in \
+        "matrix-livekit-server.service:${lk_port}:LiveKit TURN/TLS" \
+        "matrix-coturn.service:${ct_port}:coturn TURNS"; do
+        _svc="${spec%%:*}"
+        rest="${spec#*:}"
+        port="${rest%%:*}"
+        label="${rest#*:}"
+        # Сервис не установлен (звонки/coturn выключены) - ничего не ждём.
+        systemctl list-unit-files --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "$_svc" || continue
+        if ! ss -ltnH "sport = :${port}" 2>/dev/null | grep -q LISTEN; then
+            record fail "${label}" ":${port} не слушается"
+            continue
+        fi
+        if openssl s_client -verify_return_error -servername "${_sni}" \
+            -connect "127.0.0.1:${port}" </dev/null 2>/dev/null | grep -q "Verify return code: 0"; then
+            record ok "${label}" ":${port} LE-сертификат валиден"
+        else
+            record fail "${label}" ":${port} сертификат невалиден (self-signed или цепочка сломана)"
+        fi
+    done
+}
+
 # --- 5. Свежесть бэкапа ---
 check_backup_freshness() {
     if [[ "$SKIP_BACKUP" == true ]]; then
@@ -289,6 +334,7 @@ check_docker
 check_homeserver
 check_postgres
 check_proxy
+check_turn_tls
 check_backup_freshness
 check_disk
 
