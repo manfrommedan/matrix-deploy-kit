@@ -229,9 +229,10 @@ curl -s -X POST -H "Authorization: Bearer $AT" -H 'Content-Type: application/jso
   https://matrix.example.com/_matrix/client/unstable/io.element.msc4195/rtc/livekit/get_token \
   | python3 -m json.tool
 
-# 3) логи
-journalctl -f -u lk-jwt-service
-docker logs matrix-synapse 2>&1 | grep -iE "appservice|livekit" | tail
+# 3) логи (MDAD: у matrix-юнитов docker log-driver=none, `docker logs` сломан -
+#    журнал идёт из `docker start --attach` прямо в journald)
+journalctl -fu matrix-livekit-jwt-service
+journalctl -u matrix-synapse 2>&1 | grep -iE "appservice|livekit" | tail
 ```
 
 Если второй curl вернул `M_UNRECOGNIZED` (404) — проксирование не поднялось. 

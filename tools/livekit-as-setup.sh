@@ -518,12 +518,29 @@ else
         just roles
         just install-all
     )
+    # env-file прочитывается при docker create, а не на ходу уже работающего
+    # контейнера. MDAD/systemd-file мог и не измениться - тогда conditional
+    # restart сервис пропустит (сам того чувства: контейнер старше env-файла).
+    # Проверим Config.Env и при расхождении рестартнём намеренно.
+    if [[ "$DRY_RUN" != true ]] && command -v docker &>/dev/null &&
+        docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "matrix-livekit-jwt-service"; then
+        as_keys_now="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' matrix-livekit-jwt-service 2>/dev/null |
+            grep -cE '^(LIVEKIT_AS_TOKEN|LIVEKIT_HS_TOKEN)=' || true)"
+        want_keys=0
+        [[ "$UNINSTALL" == false ]] && want_keys=2
+        if [[ "${as_keys_now:-0}" -ne "$want_keys" ]]; then
+            info "контейнер jwt-сервиса сидит на устаревшем env (есть ${as_keys_now:-0} ключей, ожидалось ${want_keys}) - рестарт"
+            systemctl restart matrix-livekit-jwt-service
+            sleep 4
+        fi
+    fi
     ok "ansible применён"
 fi
 
 # === Живые smoke-проверки ===
 # При --skip-install конфиг ещё не применён (install-all не гонялся),
 # живой сервер живёт на старом конфиге - smoke дал бы ложные алерты.
+SMOKE_BAD=false
 if [[ "$SKIP_SMOKE" == false && "$DRY_RUN" != true && "$SKIP_INSTALL" != true ]]; then
     echo ""
     info "Smoke-проверки (HTTP, до 30c на шаг)..."
@@ -568,8 +585,11 @@ if [[ "$SKIP_SMOKE" == false && "$DRY_RUN" != true && "$SKIP_INSTALL" != true ]]
     if [[ "$UNINSTALL" == false ]]; then
         case "$code" in
             401 | 400 | 403 | 500 | 501) ok "MSC4512-прокси зарегистрирован (HTTP ${code} - дальше отвечает jwt-сервис)" ;;
-            404) err "MSC4512-прокси: 404 - роут не зарегистрирован (нет msc4512_enabled / lk-as.yaml не смонтирован / Synapse < 1.161). Логи: journalctl -u matrix-synapse" ;;
-            502 | 504) warn "MSC4512-прокси: HTTP ${code} - форвард на jwt-сервис не поднят (docker logs matrix-livekit-jwt-service)" ;;
+            404)
+                SMOKE_BAD=true
+                err "MSC4512-прокси: 404 - роут не зарегистрирован (нет msc4512_enabled / lk-as.yaml не смонтирован / Synapse < 1.161). Логи: journalctl -u matrix-synapse"
+                ;;
+            502 | 504) warn "MSC4512-прокси: HTTP ${code} - форвард на jwt-сервис не поднят (journalctl -u matrix-livekit-jwt-service; docker logs контейнера пуст, log-driver=none)" ;;
             000) info "MSC4512-прокси: нет ответа (узел ещё стартует)" ;;
             *) warn "MSC4512-прокси: HTTP ${code}" ;;
         esac
@@ -593,11 +613,17 @@ if [[ "$SKIP_SMOKE" == false && "$DRY_RUN" != true && "$SKIP_INSTALL" != true ]]
             ok "lk-jwt-service: образ v${lks_ver} (>= 0.7, AS-режим есть)"
         fi
         if [[ "$UNINSTALL" == false ]]; then
-            if docker logs matrix-livekit-jwt-service 2>&1 | tail -200 | grep -q "Using application service configuration"; then
-                ok "jwt-сервис: AS-конфиг активен (видит LIVEKIT_AS_TOKEN/HS_TOKEN)"
+            # Читаем env из Config.Env, а не из docker-логов: во всех MDAD-unit
+            # стоит --log-driver=none, stdout контейнера сбрасывается в null -
+            # grep docker-логов в этом режиме сломан by design.
+            as_env_keys="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' matrix-livekit-jwt-service 2>/dev/null |
+                grep -cE '^(LIVEKIT_AS_TOKEN|LIVEKIT_HS_TOKEN|LIVEKIT_HS_SERVER_NAME)=' || true)"
+            if [[ "${as_env_keys:-0}" -ge 2 ]]; then
+                ok "jwt-сервис: AS-конфиг активен (видит LIVEKIT_AS_TOKEN/HS_TOKEN из env)"
             else
-                warn "jwt-сервис: 'Using application service configuration' в логах нет - AS-режим НЕ активировался"
-                info "  docker logs matrix-livekit-jwt-service | grep -iE 'as|application service'"
+                SMOKE_BAD=true
+                warn "jwt-сервис: AS-env (LIVEKIT_AS_TOKEN/HS_TOKEN) из vars.yml ещё не попал в контейнер"
+                info "  env-file прочитывается только при пересоздании. Рестартни: systemctl restart matrix-livekit-jwt-service"
             fi
         else
             info "jwt-сервис: AS-env исчезнет после следующего install-all"
@@ -615,8 +641,12 @@ if [[ "$UNINSTALL" == false ]]; then
         log "AS-режим: конфиг готов (install-all не выполнялся, smoke пропущен)."
         info "Применить: cd ${PLAYBOOK_ROOT} && just roles && just install-all"
     else
-        log "AS-режим установлен."
-        info "Реальный звонок в свежем Element Call/Web - проверка. Логи: journalctl -u matrix-synapse | docker logs -f matrix-livekit-jwt-service"
+        if [[ "${SKIP_SMOKE:-false}" == false && "$SMOKE_BAD" == true ]]; then
+            err "файлы на месте, но smoke не пройден - допроверяй до реального звонка"
+        else
+            log "AS-режим установлен."
+        fi
+        info "Реальный звонок в свежем Element Call/Web - проверка. Логи: journalctl -fu matrix-livekit-jwt-service"
     fi
     info "Откат: bash ${SCRIPT_DIR}/livekit-as-setup.sh --uninstall -y"
 else
