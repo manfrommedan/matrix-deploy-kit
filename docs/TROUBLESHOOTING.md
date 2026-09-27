@@ -162,7 +162,7 @@ Element Web push в браузере - через WebPush API (VAPID keys). Эт
 
 **Диагностика:**
 ```bash
-docker logs livekit | grep -iE "ICE|failed|disconnected"
+journalctl -u matrix-livekit-server --no-pager | grep -iE "ICE|failed|disconnected"
 ```
 
 **Чек-лист:**
@@ -283,7 +283,7 @@ Tradeoff: server-to-server federation сигнатур станет провер
 
 5. **Проверить топик через браузер:** открой `https://ntfy.example.com/app`, подпишись на
    топик `element-*` (или конкретный, который видишь в логах ntfy:
-   `docker logs matrix-ntfy 2>&1 | grep -i publish`) и пошли тестовое сообщение.
+   `journalctl -u matrix-ntfy --no-pager | grep -i publish`) и пошли тестовое сообщение.
 
 **Типичные причины:**
 
@@ -299,7 +299,7 @@ Tradeoff: server-to-server federation сигнатур станет провер
 ```bash
 # Проверить, что ntfy вообще стартовал
 docker ps | grep matrix-ntfy
-docker logs --tail 100 matrix-ntfy 2>&1 | tail -30
+journalctl -u matrix-ntfy -n 100 --no-pager | tail -30
 
 # Проверить, что homeserver использует ntfy
 docker exec matrix-synapse cat /data/homeserver.yaml | grep -A 5 pushers

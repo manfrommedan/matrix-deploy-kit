@@ -145,7 +145,7 @@ docker exec matrix-synapse curl -s http://localhost:8008/_matrix/client/versions
 # (presence не появится в unstable_features если отключен)
 
 # 4) LiveKit
-docker logs matrix-livekit-server 2>&1 | grep -iE "starting|ICE Lite|TURN"
+journalctl -u matrix-livekit-server --no-pager | grep -iE "starting|ICE Lite|TURN"
 # ожидаем: "Starting TURN server" + "rtc.portUDP: {Start: 7882}"
 
 # 5) Real test - открой Element X на mobile через 4G/LTE
