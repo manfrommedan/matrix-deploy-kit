@@ -770,12 +770,20 @@ sync_tls_certs() {
         if ! diff -q "${cert_dir}/fullchain.pem" "${lk_dir}/fullchain.pem" &>/dev/null; then
             cp -L "${cert_dir}/fullchain.pem" "${lk_dir}/fullchain.pem"
             cp -L "${cert_dir}/privkey.pem" "${lk_dir}/privkey.pem"
-            chown "${_matrix_uid}:${_matrix_gid}" "${lk_dir}"/*.pem 2>/dev/null || true
-            chmod 640 "${lk_dir}"/*.pem
             log "LiveKit серты: обновлены"
             updated=true
         else
             info "LiveKit серты: актуальны"
+        fi
+        # Владелец/права безусловно: на фреш-деплое prepare кладёт root:root 640.
+        # diff по содержимому совпадёт, а контейнер (matrix uid) файл не прочитает.
+        if [[ -e "${lk_dir}/fullchain.pem" ]] && [[ "$_matrix_uid" != "0" ]]; then
+            if [[ $(stat -c %u "${lk_dir}/fullchain.pem") != "$_matrix_uid" ]]; then
+                log "LiveKit серты: владелец root:root -> ${_matrix_uid}:${_matrix_gid}"
+                updated=true
+            fi
+            chown "${_matrix_uid}:${_matrix_gid}" "${lk_dir}"/*.pem 2>/dev/null || true
+            chmod 640 "${lk_dir}"/*.pem
         fi
     fi
 
@@ -786,12 +794,18 @@ sync_tls_certs() {
         if ! diff -q "${cert_dir}/fullchain.pem" "${ct_dir}/fullchain.pem" &>/dev/null; then
             cp -L "${cert_dir}/fullchain.pem" "${ct_dir}/fullchain.pem"
             cp -L "${cert_dir}/privkey.pem" "${ct_dir}/privkey.pem"
-            chown "${_matrix_uid}:${_matrix_gid}" "${ct_dir}"/*.pem 2>/dev/null || true
-            chmod 640 "${ct_dir}"/*.pem
             log "Coturn серты: обновлены"
             updated=true
         else
             info "Coturn серты: актуальны"
+        fi
+        if [[ -e "${ct_dir}/fullchain.pem" ]] && [[ "$_matrix_uid" != "0" ]]; then
+            if [[ $(stat -c %u "${ct_dir}/fullchain.pem") != "$_matrix_uid" ]]; then
+                log "Coturn серты: владелец root:root -> ${_matrix_uid}:${_matrix_gid}"
+                updated=true
+            fi
+            chown "${_matrix_uid}:${_matrix_gid}" "${ct_dir}"/*.pem 2>/dev/null || true
+            chmod 640 "${ct_dir}"/*.pem
         fi
     fi
 

@@ -301,6 +301,38 @@ if [[ "$FULL" == true && "$SKIP_ANSIBLE" == false ]]; then
 
         just roles
         just install-all
+
+        # Серты TURN: prepare_server копировал их до создания пользователя matrix
+        # (свежий деплой → root:root 640, LiveKit в контейнере под matrix uid их не
+        # прочитает). Сейчас пользователь уже есть - поправляем владельца + рестарт.
+        log "Поправляю владельца TURN-сертов (после создания пользователя matrix)"
+        _fix_uid=$(id -u matrix 2>/dev/null || true)
+        _fix_gid=$(id -g matrix 2>/dev/null || true)
+        if [[ -n "$_fix_uid" && -n "$_fix_gid" ]]; then
+            _fix_data_path="$(awk '/^matrix_base_data_path:/ {sub(/^matrix_base_data_path:[[:space:]]*/,""); gsub(/^["'"'"']|["'"'"']$/,""); print; exit}' \
+                "${DEPLOY_DIR}"/inventory/host_vars/matrix.*/vars.yml 2>/dev/null | head -1)"
+            _fix_data_path="${_fix_data_path:-/matrix}"
+            _fixed_any=false
+            for _dir in "${_fix_data_path}/livekit-server/certs" "${_fix_data_path}/coturn/certs"; do
+                for _pem in "${_dir}"/*.pem; do
+                    [[ -e "$_pem" ]] || continue
+                    if [[ $(stat -c %u "$_pem") != "$_fix_uid" || $(stat -c %g "$_pem") != "$_fix_gid" ]]; then
+                        chown "${_fix_uid}:${_fix_gid}" "$_pem"
+                        chmod 640 "$_pem"
+                        _fixed_any=true
+                    fi
+                done
+            done
+            if [[ "$_fixed_any" == true ]]; then
+                systemctl restart matrix-livekit-server 2>/dev/null || true
+                systemctl restart matrix-coturn 2>/dev/null || true
+                log "Владелец сертов поправлен на ${_fix_uid}:${_fix_gid}, сервисы перезапущены"
+            else
+                info "Владелец сертов уже корректный"
+            fi
+        else
+            warn "Пользователь matrix не найден после install-all - владельца сертов поправь вручную"
+        fi
     fi
 fi
 

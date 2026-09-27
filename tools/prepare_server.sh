@@ -86,7 +86,7 @@ Firewall (ufw) опционален - у многих хостеров уже е
   --without-ntfy            Не поднимать ntfy (push-уведомления отключены)
   --without-fail2ban        Не ставить fail2ban
   --without-ssh-hardening   Не закреплять sshd
-  --without-random-ports    Использовать стандартные порты LiveKit (7881/7882/5349/3478)
+  --without-random-ports    Использовать стандартные порты LiveKit (7881/7882/5350/3479)
   --with-firewall           Включить ufw (по умолчанию выключен - у большинства уже есть SG)
 
 Reverse proxy (выбрать один):
@@ -884,7 +884,10 @@ if [[ "$SKIP_NGINX" == false ]]; then
         _matrix_uid=$(id -u matrix 2>/dev/null || echo 0)
         _matrix_gid=$(id -g matrix 2>/dev/null || echo 0)
         if [[ "$_matrix_uid" == "0" ]]; then
-            warn "Пользователь matrix ещё не создан - серты будут root:root (Ansible исправит владельца)"
+            # Свежий деплой: prepare отрабатывает до install-all, пользователя ещё нет.
+            # Ansible владельца НЕ чинит (роль чинит только свои файлы) - поправит
+            # deploy.sh после install-all либо update.sh --sync-certs.
+            warn "Пользователь matrix ещё не создан - серты будут root:root; владелец поправится после install-all"
         fi
 
         # LiveKit
@@ -906,14 +909,15 @@ if [[ "$SKIP_NGINX" == false ]]; then
         log "Coturn серты: скопированы в ${_ct_cert_dir}/"
 
         # Хук обновления сертов: копировать + рестартовать LiveKit, Coturn, nginx
-        # UID/GID вписываются в хук как литералы (определены сейчас, не меняются)
+        # UID/GID резолвим в момент прогона хука, а не литералом: на момент prepare
+        # пользователя matrix может ещё не существовать (свежий деплой).
         cat >/etc/letsencrypt/renewal-hooks/post/restart-matrix-tls.sh <<RLHOOK
 #!/bin/bash
 DOMAIN="${DOMAIN}"
 LK_DIR="${_lk_cert_dir}"
 CT_DIR="${_ct_cert_dir}"
-MATRIX_UID="${_matrix_uid}"
-MATRIX_GID="${_matrix_gid}"
+MATRIX_UID="\$(id -u matrix 2>/dev/null || echo 0)"
+MATRIX_GID="\$(id -g matrix 2>/dev/null || echo 0)"
 for DIR in "\${LK_DIR}" "\${CT_DIR}"; do
     cp -L "/etc/letsencrypt/live/\${DOMAIN}/fullchain.pem" "\${DIR}/fullchain.pem"
     cp -L "/etc/letsencrypt/live/\${DOMAIN}/privkey.pem" "\${DIR}/privkey.pem"

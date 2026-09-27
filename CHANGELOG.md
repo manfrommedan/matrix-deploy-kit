@@ -45,6 +45,24 @@
 
 ### Fixed
 
+- **LiveKit TURN/TLS чинится при свежем деплое** - `prepare_server.sh` до
+  `install-all` кладёт серты `root:root 640`, а Ansible владельца не правит:
+  роль livekit-тлс работает в контейнере под uid пользователя matrix и
+  `/certs` не читает → первый старт TURN/TLS падал. Теперь:
+  - deploy.sh после `just install-all` поправляет владельца и рестартит
+    `matrix-livekit-server` / `matrix-coturn`
+  - `update.sh --sync-certs` правит владельца безусловно (раньше chown стоял
+    только в ветке `diff -q` - на идентичных сертах никогда не выполнялся)
+  - renewal-хук `restart-matrix-tls.sh` резолвит UID/GID matrix в момент
+    прогона (раньше литералом ставился `0` = root)
+- **Дефолты TURN-портов wizard'а 5349/3478 → 5350/3479** - старые
+  пересекались с coturn (`3478/5349`). Новые - те же, что в group_vars MDAD.
+- **Коллизии рандома LiveKit ↔ coturn** - раньше генерация портов coturn
+  (10000-59999) не знала о портах LiveKit (10000-49999), входящие в диапазон
+  Coturn могли пересечься. Теперь coturn порты генерируются через
+  `gen_dynamic_port` с исключением уже выбранных LiveKit/Coturn портов
+  (включая relay-диапазон min..min+20).
+
 - **TURN-over-TLS (TURNS) записывается в vars.yml**: wizard `generate_vars.sh`
   теперь генерирует TLS-блок coturn (`coturn_tls_enabled`, `coturn_realm`,
   явные `coturn_tls_cert_path`/`coturn_tls_key_path` + mount `/certs` в

@@ -782,7 +782,7 @@ if [[ "${SKIP_WIZARD:-false}" != "true" ]]; then
 
         # --- Настройка портов LiveKit ---
         info "По умолчанию LiveKit использует стандартные порты:"
-        info "  ICE/TCP: ${BOLD}7881${NC}, ICE/UDP: ${BOLD}7882${NC}, TURN/TLS: ${BOLD}5349${NC}, TURN/UDP: ${BOLD}3478${NC}"
+        info "  ICE/TCP: ${BOLD}7881${NC}, ICE/UDP: ${BOLD}7882${NC}, TURN/TLS: ${BOLD}5350${NC}, TURN/UDP: ${BOLD}3479${NC}"
         echo ""
         info "Рандомизация портов затрудняет обнаружение сервиса при сканировании"
         warn "От DPI это ${RED}не защищает${NC} - DPI анализирует содержимое, а не номер порта"
@@ -825,8 +825,9 @@ if [[ "${SKIP_WIZARD:-false}" != "true" ]]; then
         else
             LIVEKIT_RTC_TCP=$(ask_port "ICE/TCP порт" "7881")
             LIVEKIT_RTC_UDP=$(ask_port "ICE/UDP порт" "7882")
-            LIVEKIT_TURN_TLS=$(ask_port "TURN/TLS порт" "5349")
-            LIVEKIT_TURN_UDP=$(ask_port "TURN/UDP порт" "3478")
+            # 5350/3479 (не 5349/3478): 5349/3478 заняты coturn, см. group_vars MDAD
+            LIVEKIT_TURN_TLS=$(ask_port "TURN/TLS порт" "5350")
+            LIVEKIT_TURN_UDP=$(ask_port "TURN/UDP порт" "3479")
         fi
 
         echo ""
@@ -977,15 +978,28 @@ if [[ "${SKIP_WIZARD:-false}" != "true" ]]; then
 
         if ask_yn "Рандомизировать порты Coturn?" "n"; then
             RANDOMIZE_COTURN_PORTS=true
-            COTURN_STUN_PORT=$((RANDOM % 50000 + 10000))
-            COTURN_TURNS_PORT=$((RANDOM % 50000 + 10000))
-            # Relay range - 20 последовательных портов из случайного начала
-            COTURN_RELAY_MIN=$((RANDOM % 40000 + 10000))
-            COTURN_RELAY_MAX=$((COTURN_RELAY_MIN + 20))
+            # Избегаем коллизий с уже выбранными портами LiveKit (диапазоны пересекаются)
+            _lk_used=""
+            if [[ "$CALLS_ENABLED" == true ]]; then
+                _lk_used="${LIVEKIT_RTC_TCP} ${LIVEKIT_RTC_UDP} ${LIVEKIT_TURN_TLS} ${LIVEKIT_TURN_UDP}"
+            fi
 
-            # Уникальность stun vs turns
-            while [[ "$COTURN_TURNS_PORT" == "$COTURN_STUN_PORT" ]]; do
-                COTURN_TURNS_PORT=$((RANDOM % 50000 + 10000))
+            COTURN_STUN_PORT=$(gen_dynamic_port 10000 59999 "$_lk_used")
+            COTURN_TURNS_PORT=$(gen_dynamic_port 10000 59999 "${_lk_used} ${COTURN_STUN_PORT}")
+            # Relay range - 20 последовательных портов из случайного начала.
+            # Весь диапазон [min, min+20] не должен пересекаться с livekit/stun/turns.
+            while :; do
+                COTURN_RELAY_MIN=$((RANDOM % 40000 + 10000))
+                COTURN_RELAY_MAX=$((COTURN_RELAY_MIN + 20))
+                _ok=1
+                for p in $_lk_used "$COTURN_STUN_PORT" "$COTURN_TURNS_PORT"; do
+                    [[ -n "$p" ]] || continue
+                    if [[ "$p" -ge "$COTURN_RELAY_MIN" && "$p" -le "$COTURN_RELAY_MAX" ]]; then
+                        _ok=0
+                        break
+                    fi
+                done
+                [[ "$_ok" == 1 ]] && break
             done
 
             info "Порты Coturn:"
