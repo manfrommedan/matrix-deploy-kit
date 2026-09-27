@@ -327,6 +327,35 @@ livekit_server_config_turn_udp_port: 13478     # TURN/UDP
 > (не 5349/3478, как дефолт роли) - 5349/3478 заняты coturn, и group_vars
 > MDAD делает тот же override.
 
+### Transport fallback (DPI-блокировки UDP)
+
+Клиент (Element Web/X) параллельно собирает ICE-кандидаты со всех транспортов
+и подключается к первому работающему. Ladder твоего сервера:
+
+| Приоритет | Транспорт | vars.yml | Слой |
+|---|---|---|---|
+| 1 | ICE/UDP | `livekit_server_container_rtc_udp_bind_port` | ICE/DTLS |
+| 2 | ICE/TCP | `livekit_server_container_rtc_tcp_bind_port` | plain TCP (не TLS!) |
+| 3 | TURN/UDP | `livekit_server_config_turn_udp_port` | plain UDP |
+| 4 | TURN/TLS | `livekit_server_config_turn_tls_port` | **TLS 1.3** |
+
+Если DPI/ТСПУ режет UDP-трафик — фолбэк идёт автоматически вплоть до
+TURN/TLS на tcp-порту, который выглядит как обычный TLS-сервер с валидным
+LE-сертом. Это базовая устойчивость к DPI-блокировке UDP.
+
+> **ICE/TCP — не TLS.** Голый ICE-поток поверх TCP, для DPI отличим от
+> обычного HTTPS (TLS-handshake отсутствует). Если РКН будет применять DPI-ярлыки,
+> из вcей цепочки выживает только порт 4 (TURN/TLS).
+>
+> **`allow_tcp_fallback: true`** обязательно должен стоять в
+> `livekit_server_configuration_extension_yaml` — без него ICE/TCP-
+> кандидат не собирается, и ICE подпрыгнет сразу на TURN/UDP, минуя TCP.
+>
+> Coturn занимает порт 5349/3478 (отдельный TURNндpoint на вашем хосте) — это
+> сторонний источник для 1:1 VoIP-звонков через `matrix_synapse_turn_uris`,
+> не путать с LiveKit TURN/TLS: последний — собственный TURN LiveKit для
+> group-звонков. Два потока не конфликтуют.
+
 ### LiveKit тюнинг
 
 ```yaml
