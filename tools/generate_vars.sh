@@ -1969,6 +1969,22 @@ livekit_server_config_rtc_node_ip: '${SERVER_IP}'
 VARSEOF
         fi
     fi
+
+    # TURN/TLS: TLS терминирует сам LiveKit (каноничный режим кита, не traefik).
+    # Серты на хосте в ${DATA_PATH}/livekit-server/certs кладут prepare_server.sh
+    # и certbot post-hook (renew → restart matrix-livekit-server).
+    cat >>"$OUTPUT_FILE" <<VARSEOF
+
+# LiveKit TURN/TLS: external_tls=false → LiveKit сам читает LE-серты из маунта /certs
+livekit_server_config_turn_enabled: true
+livekit_server_config_turn_external_tls: false
+livekit_server_config_turn_cert_file: /certs/fullchain.pem
+livekit_server_config_turn_key_file: /certs/privkey.pem
+livekit_server_container_additional_volumes_custom:
+  - src: ${DATA_PATH}/livekit-server/certs
+    dst: /certs
+    options: ro
+VARSEOF
 fi
 
 # -----------------------------------------------------------------------------
