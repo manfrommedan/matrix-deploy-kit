@@ -307,12 +307,12 @@ livekit_server_config_turn_udp_port: 13478     # TURN/UDP
 > после `install-all` и рестартит `matrix-livekit-server` / `matrix-coturn`.
 > На живом сервере то же делает `tools/update.sh --sync-certs`.
 >
-> **Миграция с traefik-терминации (external_tls: true → false)**: при первом
-> запуске playbook с новым блоком роль `livekit_server` (setup.yml №126) бежит
-> раньше `traefik` (№138) - traefik ещё держит хост-порт TURN/TLS, поэтому
-> LiveKit один раз не поднимется (`bind: address already in use`). Просто
-> перезапусти `just install-all` ещё раз - на втором прогоне traefik уже
-> снят с TURN-порта.
+> **Миграция с traefik-терминации (external_tls: true → false)**: рестарты
+> сервисов происходят один батчем в конце `install-all`, и traefik к тому
+> моменту уже перерендерен без turn entrypoint. Обычно это значит, что всё
+> поднимается со 2-й попытки автоматического ретрая (отсюда `restart.retry`.
+> Если рестарт исчерпал ретраи и playbook упал на verification — просто
+> перезапусти `just install-all`, конфликт уже точно ушёл.
 >
 > **Дефолты портов**: wizard предлагает `TURN/TLS 5350` / `TURN/UDP 3479`
 > (не 5349/3478, как дефолт роли) - 5349/3478 заняты coturn, и group_vars
