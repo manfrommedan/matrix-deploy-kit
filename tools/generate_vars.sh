@@ -408,7 +408,6 @@ if [[ -n "${WIZARD_NONINTERACTIVE:-}" || -n "${ENV_FILE:-}" ]]; then
     : "${BACKUP_RETAIN_DAYS:=7}"
     : "${SMTP_USE_TLS:=true}"
     : "${MATRIX_RTC_TRANSPORT_TIMEOUT:=}"
-    : "${LIVEKIT_TURNS_PORT:=5349}"
     : "${ENABLED_SERVICES:=}"
     : "${LOCALE:=ru}"
     : "${MAS_ADMIN_API:=}"

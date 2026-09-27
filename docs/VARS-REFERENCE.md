@@ -330,9 +330,6 @@ livekit_server_configuration_extension_yaml: |
       - mime: video/vp8
 ```
 
-> **ВАЖНО**: После рандомизации TURN-портов нужно запустить `setup-traefik` тег,
-> чтобы убрать порт из Traefik entrypoints (конфликт портов).
-
 ### ⚠️ AS-режим lk-jwt-service (MSC4512) — ЭКСПЕРИМЕНТАЛЬНАЯ ФИЧА
 
 Новая схема выдачи токенов LiveKit через приложение Synapse (вместо прямого HTTP

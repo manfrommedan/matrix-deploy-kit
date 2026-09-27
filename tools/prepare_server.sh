@@ -548,12 +548,13 @@ if [[ "$SKIP_FIREWALL" == false ]]; then
     ufw allow "${COTURN_TURNS_PORT:-5349}/udp" comment "TURNS UDP"
     ufw allow "${COTURN_RELAY_RANGE:-49152:49172}/udp" comment "TURN relay UDP"
 
-    # LiveKit порты (если указаны)
-    [[ -n "$LK_RTC_TCP" ]] && ufw allow "${LK_RTC_TCP}/tcp" comment "LiveKit RTC TCP"
-    [[ -n "$LK_RTC_UDP" ]] && ufw allow "${LK_RTC_UDP}/udp" comment "LiveKit RTC UDP"
-    [[ -n "$LK_TURN_TLS" ]] && ufw allow "${LK_TURN_TLS}/tcp" comment "LiveKit TURN TLS"
-    [[ -n "$LK_TURN_TLS" ]] && ufw allow "${LK_TURN_TLS}/udp" comment "LiveKit TURN TLS UDP"
-    [[ -n "$LK_TURN_UDP" ]] && ufw allow "${LK_TURN_UDP}/udp" comment "LiveKit TURN UDP"
+    # LiveKit: с --with-firewall порты открываем всегда. Пусто = не рандомизировали
+    # (--without-random-ports) = wizard-дефолты 7881/7882/5350/3479, ср. generate_vars.sh
+    ufw allow "${LK_RTC_TCP:-7881}/tcp" comment "LiveKit RTC TCP"
+    ufw allow "${LK_RTC_UDP:-7882}/udp" comment "LiveKit RTC UDP"
+    ufw allow "${LK_TURN_TLS:-5350}/tcp" comment "LiveKit TURN TLS"
+    ufw allow "${LK_TURN_TLS:-5350}/udp" comment "LiveKit TURN TLS UDP"
+    ufw allow "${LK_TURN_UDP:-3479}/udp" comment "LiveKit TURN UDP"
 
     # Admin-панели на отдельных портах
     [[ -n "$KETESA_PORT" ]] && ufw allow "${KETESA_PORT}/tcp" comment "Ketesa"
