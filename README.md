@@ -3,7 +3,6 @@
 [![Matrix](https://img.shields.io/badge/Matrix-Server-blue)]()
 [![Docker](https://img.shields.io/badge/Docker-ready-blue)]()
 [![License](https://img.shields.io/badge/license-MIT-green)]()
-[![CI](https://github.com/)]()
 [![Maintained](https://img.shields.io/badge/maintained-yes-green)]()
 
 Полный набор скриптов для поднятия **Matrix homeserver** на базе
