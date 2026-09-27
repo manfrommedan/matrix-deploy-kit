@@ -1676,15 +1676,18 @@ matrix_client_element_branding_auth_footer_links: ${ELEMENT_FOOTER_LINKS}
 EOF
 
 if [[ "$ELEMENT_QR_LOGIN" == true && "$MAS_ENABLED" == true ]]; then
-    # QR-код логин (MSC4108): synapse rendezvous + флаг element-web feature_qr_login.
+    # QR-код логин (MSC4108): synapse rendezvous + флаг element-web feature_login_with_qr.
     # Требует MAS (validate в роли synapse падает без matrix_authentication_service) —
     # в визарде MAS_ENABLED=true по умолчанию. Роуты rendezvous доходят через / proxy.
     cat >>"$OUTPUT_FILE" <<EOF
 
 # QR-код логин (MSC4108): вход "покажи QR ↔ подтверди на залогиненном устройстве"
 matrix_synapse_experimental_features_msc4108_enabled: true
+# ⚠ Если помимо QR тебе нужен свой extension_json — НЕ добавляй второй блок
+# с тем же ключом ниже: YAML дубль ключ делает last-wins, так что либо QR
+# уедет, либо твой JSON потеряется. Мерджи свои поля в этот же JSON.
 matrix_client_element_configuration_extension_json: |
-  {"features":{"feature_qr_login": true}}
+  {"features":{"feature_login_with_qr": true}}
 EOF
 fi
 

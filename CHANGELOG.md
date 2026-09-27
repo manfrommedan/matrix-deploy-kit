@@ -7,7 +7,9 @@
 - **`ELEMENT_QR_LOGIN` (MSC4108) - вход в Element Web по QR-коду**. Вопрос в
   секции 6/12 wizard'а, default y (требует MAS: если MAS выключен, wizard молча
   ставит false). Эмитит `matrix_synapse_experimental_features_msc4108_enabled: true`
-  + `matrix_client_element_configuration_extension_json: {"features": {"feature_qr_login": true}}`.
+  + `matrix_client_element_configuration_extension_json: {"features": {"feature_login_with_qr": true}}`.
+  (Первая версия дала неверное имя флага `feature_qr_login` - element-web к нему
+  не реагирует; корректное - `feature_login_with_qr`, см. labs.md element-web.)
   Роуты rendezvous (`/_matrix/client/(unstable|v1)/org.matrix.msc4108/rendezvous`)
   доходят до Synapse через существующий `/`-proxy matrix.DOMAIN.
 - **TURN TLS смоук в healthcheck** (`tools/healthcheck.sh --domain X`):
