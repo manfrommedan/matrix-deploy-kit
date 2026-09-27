@@ -279,7 +279,7 @@ if not uninstall:
 
     # 3) transports — upsert livekit-записи (чужие записи не трогаем).
     #    Переопределяем ВЕСЬ список, а не _custom: у MDAD список = default+auto+custom,
-    #    а default уже содержит livekit-запись TOЛЬКО c livekit_service_url -
+    #    а default уже содержит livekit-запись TOЛЬКO c livekit_service_url -
     #    без полного переопреждения получились бы ДВЕ записи.
     key = "matrix_synapse_matrix_rtc_transports"
     transports = data.get(key)
@@ -448,8 +448,8 @@ ASEOF
         ok "записан: ${AS_FILE}"
 
         mkdir -p "$SYNAPSE_CFG_DIR"
-        # Владелец = host-юзер MDAD (matrix_user_name, дефолт "matrix"), к которому
-        # belong конфиг-файлы. Не matrix-synapse (такого host-юзера по умолчанию нет).
+        # Владелец = host-юзер MDAD (matrix_user_name, дефолт "matrix"),
+        # которому принадлежат конфиг-файлы. Не matrix-synapse (такого host-юзера по умолчанию нет).
         OWNER="$(stat -c %U "${SYNAPSE_CFG_DIR}/homeserver.yaml" 2>/dev/null || echo matrix)"
         GROUP="$(stat -c %G "${SYNAPSE_CFG_DIR}/homeserver.yaml" 2>/dev/null || echo matrix)"
         install -m 640 -o "$OWNER" -g "$GROUP" "$AS_FILE" "${SYNAPSE_CFG_DIR}/lk-as.yaml"
@@ -519,9 +519,11 @@ else
         just install-all
     )
     # env-file прочитывается при docker create, а не на ходу уже работающего
-    # контейнера. MDAD/systemd-file мог и не измениться - тогда conditional
-    # restart сервис пропустит (сам того чувства: контейнер старше env-файла).
-    # Проверим Config.Env и при расхождении рестартнём намеренно.
+    # контейнера. MDAD условный рестарт смотрит на изменение unit-файла
+    # и т.п. - если unit не переписался (а нельзя не переписать, если изменён
+    # только env-file), рестарт может пропуститься, и контейнер останется со
+    # старым env (на практике проверено: env-file новее контейнера).
+    # Проверяем Config.Env и при расхождении рестартим сознательно.
     if [[ "$DRY_RUN" != true ]] && command -v docker &>/dev/null &&
         docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "matrix-livekit-jwt-service"; then
         as_keys_now="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' matrix-livekit-jwt-service 2>/dev/null |

@@ -177,7 +177,7 @@ homeserver как **application service**, клиент берёт токен ч
 - кладёт `lk-as.yaml` (токены) рядом с `vars.yml` и в synapse config-dir;
 - гоняет `just roles && just install-all`;
 - живые smoke-проверки: `federation/version`, `rtc/transports`, MSC4512-прокси,
-  `Using application service configuration` в логах jwt-сервиса.
+  `LIVEKIT_AS_TOKEN/HS_TOKEN` в env контейнера (`docker inspect ... Config.Env`).
 
 Опции: `--dry-run` (только проверки, без root), `--skip-install` (без ansible),
 `--skip-smoke`, `--uninstall` (откат), `-y`.

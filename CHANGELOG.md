@@ -91,6 +91,15 @@
 
 ### Fixed
 
+- **`livekit-as-setup.sh` smoke не работал под `--log-driver=none`**: все
+  MDAD-unit'ы создаются с `--log-driver=none` (stdout контейнера сбрасывается
+  в никуда), поэтому grep'нуть строку "Using application service configuration"
+  из `docker logs` нельзя by design. Проверка переведена на
+  `docker inspect Config.Env` (LIVEKIT_AS_TOKEN/HS_TOKEN в живом контейнере).
+  Плюс: если install-all обновил env-file, но условный restart проморгал
+  (unit-файл не менялся), скрипт сам рестартит `matrix-livekit-jwt-service`
+  и ждёт его подхвата (иначе AS-режим находится в полурабочем состоянии:
+  vars.yml говорит "есть", а контейнер "нет").
 - **`((x++))` тихо убивал скрипты под `set -e`** - post-increment возвращает
   старое значение, при 0 это статус 1. `nuke-user.sh` умирал на первой
   странице пейджинга и на первой комнате при redact, `test-ntfy.sh` - уже

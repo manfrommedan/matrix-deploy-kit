@@ -302,7 +302,10 @@ install-all — на шаге 6.
 значения не трогает), кладёт `lk-as.yaml` рядом с vars.yml (там хранятся токены)
 и в synapse config-dir, гоняет `just roles && just install-all` и живые
 smoke-проверки (federation/version, rtc/transports, MSC4512-прокси,
-`Using application service configuration` в логах jwt-сервиса).
+`LIVEKIT_AS_TOKEN/HS_TOKEN` в env контейнера через `docker inspect Config.Env`).
+Если контейнер jwt-сервиса сидит на устаревшем env (`docker create` перечитывает
+env-file только при пересоздании, а conditional restart мог пройти мимо),
+скрипт рестартит сервис сам.
 
 ---
 

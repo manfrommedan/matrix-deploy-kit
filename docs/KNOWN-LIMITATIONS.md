@@ -89,6 +89,18 @@ Limitations:
   но старые клиенты (до поддержки MSC4512) продолжают ходить напрямую в
   jwt-service — держите JWT-сервис и его TLS/автентификацию рабочими,
   полагаясь только на AS.
+- **Логи matrix-контейнеров — только через journalctl**: во всех MDAD-unit'ах
+  стоит `--log-driver=none` (stdout контейнера сбрасывается в null), поэтому
+  `docker logs matrix-*` не работает. Читай логи через
+  `journalctl -fu <service>` (docker стартует с `--attach`, stdout попадает
+  в journald) или `docker inspect`.
+- **Устаревший env в контейнере**: `docker create` читает `--env-file`
+  только при пересоздании контейнера. MDAD решает, рестартовать ли сервис,
+  по изменению unit-файла; если поменялся только env-file (без unit), условный
+  restart мог пропустить — контейнер останется со старым env (в AS-режиме
+  это 'vars говорит да, контейнер нет'). `livekit-as-setup.sh` детектирует
+  такое расхождение и рестартит намеренно; при ручном flow сделай
+  `systemctl restart matrix-livekit-jwt-service`.
 - Откат: `bash tools/livekit-as-setup.sh --uninstall` (убирает блоки из
   vars.yml + registration и переустанавливает) либо вручную: убрать блок из
   vars.yml + `rm <data_path>/synapse/config/lk-as.yaml` + опять `just install-all`.
