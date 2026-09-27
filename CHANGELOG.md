@@ -43,6 +43,18 @@
   позволяет тестам перехватить код возврата через `set +e`. В скриптах
   с `set -e` поведение идентично (скрипт выйдет с тем же кодом).
 
+### Fixed
+
+- **TURN-over-TLS (TURNS) записывается в vars.yml**: wizard `generate_vars.sh`
+  теперь генерирует TLS-блок coturn (`coturn_tls_enabled`, `coturn_realm`,
+  явные `coturn_tls_cert_path`/`coturn_tls_key_path` + mount `/certs` в
+  `coturn_container_additional_volumes`) и — при рандомизации портов —
+  `matrix_synapse_turn_uris` с явными host-портами. Раньше MDAD-дефолт с
+  выключенным `traefik_certs_dumper` производил пустые cert-пути, и
+  Synapse рекламировал клиентам неработающие `turns:` URI. Сертификаты
+  по-прежнему раскладывает `prepare_server.sh` (`${DATA_PATH}/coturn/certs`
+  + renewal-хук). См. docs/VARS-REFERENCE.md §12.
+
 ### Changed
 
 - **LiveKit убран из `matrix_server_fqn_*`** - раньше kit просил

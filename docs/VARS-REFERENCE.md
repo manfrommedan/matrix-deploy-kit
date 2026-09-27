@@ -470,6 +470,11 @@ matrix_synapse_turn_uris:
 > **Стандартные порты** (3478/5349) не требуют переопределения URI - клиенты
 > используют их по умолчанию.
 
+Примечание: при включённом Coturn wizard (`generate_vars.sh`) сам записывает
+TLS-блок (`coturn_tls_enabled`, cert-пути, mount) и — при рандомизации портов —
+`matrix_synapse_turn_uris` с явными портами, так что ручная правка не нужна.
+Сертификаты (certbot) уже кладёт в `${DATA_PATH}/coturn/certs` `prepare_server.sh`.
+
 ---
 
 ## 13. ntfy (push-уведомления)

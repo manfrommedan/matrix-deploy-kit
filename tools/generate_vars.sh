@@ -2284,8 +2284,28 @@ coturn_container_stun_tls_host_bind_port_tcp: '${COTURN_TURNS_PORT}'
 coturn_container_stun_tls_host_bind_port_udp: '${COTURN_TURNS_PORT}'
 coturn_turn_udp_min_port: ${COTURN_RELAY_MIN}
 coturn_turn_udp_max_port: ${COTURN_RELAY_MAX}
+# URI с явными host-портами: MDAD-дефолт рекламирует без портов (3478/5349),
+# а контейнер у нас опубликован на нестандартных
+matrix_synapse_turn_uris:
+  - turns:${SUBDOMAIN_MATRIX}:${COTURN_TURNS_PORT}?transport=tcp
+  - turns:${SUBDOMAIN_MATRIX}:${COTURN_TURNS_PORT}?transport=udp
+  - turn:${SUBDOMAIN_MATRIX}:${COTURN_STUN_PORT}?transport=tcp
+  - turn:${SUBDOMAIN_MATRIX}:${COTURN_STUN_PORT}?transport=udp
 VARSEOF
     fi
+
+    # TURN-over-TLS: kit держит nginx+certbot на хосте, traefik-certs-dumper у нас выключен,
+    # поэтому MDAD-дефолт вычисляет пустые cert-пути — задаём явные (серты кладёт prepare_server.sh)
+    cat >>"$OUTPUT_FILE" <<VARSEOF
+coturn_tls_enabled: true
+coturn_realm: ${SUBDOMAIN_MATRIX}
+coturn_tls_cert_path: /certs/fullchain.pem
+coturn_tls_key_path: /certs/privkey.pem
+coturn_container_additional_volumes:
+  - src: ${DATA_PATH}/coturn/certs
+    dst: /certs
+    options: ro
+VARSEOF
 fi
 
 # --- ntfy ---
