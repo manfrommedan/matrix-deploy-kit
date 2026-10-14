@@ -2270,11 +2270,21 @@ VARSEOF
         fi
     fi
 
+    # TTL access-токена MAS: дефолт 300с — клиенты (Element X) ловят 401 и делают
+    # OAuth-рефреш на каждом пробуждении, включая пуш-путь. 1800с убирает рефреш
+    # с горячего пути; refresh-токен при этом продолжает ротироваться.
+    # Блок расширения конфига один: ToS-брендинг дописывается в него же ниже.
+    cat >>"$OUTPUT_FILE" <<VARSEOF
+
+# MAS: TTL access-токена (см. комментарий в generate_vars.sh)
+matrix_authentication_service_configuration_extension_yaml: |
+  experimental:
+    access_token_ttl: 1800
+VARSEOF
+
     if [[ -n "$MAS_TOS_URI" ]]; then
         cat >>"$OUTPUT_FILE" <<VARSEOF
-
-# ToS - обязательный чекбокс при регистрации
-matrix_authentication_service_configuration_extension_yaml: |
+  # ToS - обязательный чекбокс при регистрации
   branding:
     tos_uri: '${MAS_TOS_URI}'
 VARSEOF

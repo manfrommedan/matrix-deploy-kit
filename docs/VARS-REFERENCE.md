@@ -157,8 +157,12 @@ matrix_authentication_service_config_account_password_registration_email_require
 # Регистрация по токенам (invite-only)
 matrix_authentication_service_config_account_password_registration_token_required: true
 
-# ToS - чекбокс при регистрации
+# Расширение конфига MAS: TTL access-токена и ToS-чекбокс при регистрации.
+# access_token_ttl: дефолт 300с заставляет клиентов (Element X) делать
+# 401 + OAuth-рефреш на каждом пробуждении, включая обработку пуша.
 matrix_authentication_service_configuration_extension_yaml: |
+  experimental:
+    access_token_ttl: 1800
   branding:
     tos_uri: 'https://matrix.example.com/tos'
 ```
