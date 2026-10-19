@@ -260,11 +260,16 @@ if not uninstall:
     efc = data.get("matrix_synapse_experimental_features_custom")
     if not isinstance(efc, dict):
         if efc is not None:
-            print("WARN: matrix_synapse_experimental_features_custom не dict - заменяю на {} + msc4512", file=sys.stderr)
+            print("WARN: matrix_synapse_experimental_features_custom не dict - заменяю на {} + msc4512/msc4502", file=sys.stderr)
         efc = {}
     if efc.get("msc4512_enabled") is not True:
         efc["msc4512_enabled"] = True
         changed.append("experimental_features_custom.msc4512_enabled = true")
+    # msc4502: is_joined-эндпоинт (room_membership.py:102). Без него lk-jwt-service
+    # >= 0.9 падает с 502 "Unable to verify room membership" на standalone-эндпоинтах.
+    if efc.get("msc4502_enabled") is not True:
+        efc["msc4502_enabled"] = True
+        changed.append("experimental_features_custom.msc4502_enabled = true")
     data["matrix_synapse_experimental_features_custom"] = efc
 
     # 2) версия jwt-сервиса — AS-режим есть с 0.7; держим latest
@@ -355,6 +360,9 @@ else:
     if isinstance(efc, dict) and "msc4512_enabled" in efc:
         del efc["msc4512_enabled"]
         changed.append("experimental_features_custom: убран msc4512_enabled")
+    if isinstance(efc, dict) and "msc4502_enabled" in efc:
+        del efc["msc4502_enabled"]
+        changed.append("experimental_features_custom: убран msc4502_enabled")
         if not efc:
             del data["matrix_synapse_experimental_features_custom"]
 
@@ -600,6 +608,24 @@ if [[ "$SKIP_SMOKE" == false && "$DRY_RUN" != true && "$SKIP_INSTALL" != true ]]
             404) ok "после отката: MSC4512-прокси 404 (как и должно)" ;;
             000) info "после отката: MSC4512-прокси без ответа" ;;
             *) warn "после отката: MSC4512-прокси ${code} (ожидалось 404; возможно, install-all ещё отрабатывает)" ;;
+        esac
+    fi
+
+    # MSC4502 is_joined: при включённом флаге отвечает {"joined":...} даже на
+    # несуществующую комнату/юзера; при выключенном - 404 M_UNRECOGNIZED.
+    # Без флага jwt-service >= 0.9 даёт 502 "Unable to verify room membership" на /sfu/get.
+    if [[ "$UNINSTALL" == false ]]; then
+        isj="$(curl -s --max-time 5 \
+            -H "Authorization: Bearer ${AS_TOKEN_FILE}" \
+            "${base}/_matrix/client/unstable/io.element.msc4502/rooms/!smoke:${DOMAIN}/is_joined?mxid=@smoke:${DOMAIN}" 2>/dev/null || true)"
+        case "$isj" in
+            *'"joined"'*) ok "MSC4502 is_joined жив (jwt-service >= 0.9 сможет проверять membership)" ;;
+            *M_UNRECOGNIZED*)
+                SMOKE_BAD=true
+                err "is_joined: 404 M_UNRECOGNIZED - нет msc4502_enabled: true в experimental_features (без него 502 на /sfu/get у jwt-service >= 0.9)"
+                ;;
+            "") info "is_joined: нет ответа (узел ещё стартует)" ;;
+            *) warn "is_joined: неожиданный ответ: ${isj:0:120}" ;;
         esac
     fi
 

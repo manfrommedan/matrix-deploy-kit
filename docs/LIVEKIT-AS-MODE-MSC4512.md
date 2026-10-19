@@ -116,6 +116,9 @@ sudo chmod 640 /etc/matrix-synapse/lk-as.yaml
 ```yaml
 experimental_features:
   msc4512_enabled: true            # проксирование C-S -> AS (default false даже в v1.161!)
+  msc4502_enabled: true            # is_joined-эндпоинт (room_membership.py:102). Без него
+                                   # lk-jwt-service >= 0.9 падает с 502 "Unable to verify
+                                   # room membership" на /sfu/get, /get_token
   msc4143_enabled: true            # отдача /rtc/transports клиентам — без него url: вообще
                                    # не доходит (сервлет регистрируется только при флаге,
                                    # matrixrtc.py:51). В MDAD включается автоматически
@@ -251,6 +254,7 @@ journalctl -u matrix-synapse 2>&1 | grep -iE "appservice|livekit" | tail
 # экспериментальные флаги (merge, чужие auto-флаги не трогаем)
 matrix_synapse_experimental_features_custom:
   msc4512_enabled: true
+  msc4502_enabled: true   # is_joined; без него jwt-service >= 0.9 → 502 на standalone-эндпоинтах
   # msc4143_enabled НЕ нужен — MDAD включает его автоматически при ненулевых transports
   # (roles/custom/matrix-synapse/main.yml: msc4143 = transports | length > 0)
 

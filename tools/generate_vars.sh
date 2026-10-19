@@ -2051,8 +2051,11 @@ if [[ "${LIVEKIT_AS_MODE:-false}" == true ]]; then
 # Детали: docs/LIVEKIT-AS-MODE-MSC4512.md
 
 # Флаг проксирования C-S → appservice (merge, остальные auto-флаги не трогаем)
+# msc4502: is_joined-эндпоинт; без него lk-jwt-service >= 0.9 даёт
+# 502 "Unable to verify room membership" на /sfu/get
 matrix_synapse_experimental_features_custom:
   msc4512_enabled: true
+  msc4502_enabled: true
 
 # AS-режим появился в 0.7; держим latest - mdad сам подтянет свежий образ
 # (ghcr :latest = 0.7.0 на сегодня; self-build на arm при latest чеканит main)

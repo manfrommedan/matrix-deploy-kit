@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **502 "Unable to verify room membership" после обновления lk-jwt-service до 0.9.0.**
+  В 0.9.0 standalone-эндпоинты (`/sfu/get`, `/get_token`) стали проверять
+  membership через MSC4502 `is_joined`, а Synapse регистрирует этот роут только
+  при `experimental_features.msc4502_enabled: true` (без флага - 404
+  M_UNRECOGNIZED → 502 у клиента). `tools/generate_vars.sh` и
+  `tools/livekit-as-setup.sh` (install и uninstall) теперь ставят/убирают
+  `msc4502_enabled` вместе с `msc4512_enabled`; `tools/install-livekit-as.sh`
+  валидирует оба флага в vars.yml и добавлен is_joined-smoke в оба скрипта.
+  Кейс описан в `docs/TROUBLESHOOTING.md` (раздел 7).
+
 ### Added
 
 - **`ELEMENT_QR_LOGIN` (MSC4108) - вход в Element Web по QR-коду**. Вопрос в

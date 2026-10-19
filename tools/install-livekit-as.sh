@@ -132,6 +132,21 @@ _check_var "matrix_synapse_app_service_config_files"
 _check_var "matrix_synapse_matrix_rtc_transports"
 _check_var "matrix_livekit_jwt_service_environment_variables_extension"
 _check_var "livekit_server_path_prefix"
+
+# Флаги ВНУТРИ custom-блока: их отсутствие = 404 M_UNRECOGNIZED на MSC-эндпоинтах.
+# Без msc4502_enabled jwt-service >= 0.9 падает с 502 "Unable to verify room membership".
+for flag in msc4512_enabled msc4502_enabled; do
+    if awk -v flag="$flag" '
+        /^matrix_synapse_experimental_features_custom:/ {f=1; next}
+        /^[^[:space:]#]/ {f=0}
+        f && $1 == flag":" && $2 == "true" {found=1}
+        END {exit !found}' "$VARS_FILE"; then
+        ok "  ${flag}: true"
+    else
+        err "  ОТСУТСТВУЕТ: ${flag}: true в matrix_synapse_experimental_features_custom"
+        MISSING=$((MISSING + 1))
+    fi
+done
 [[ "$MISSING" -eq 0 ]] || die "В vars.yml не хватает блоков (см. выше). Ответь 'y' на вопрос AS-режима в wizard'е и перегенерируй vars."
 
 # AS-режим есть с 0.7; kit пинит latest, чтобы образ сам обновлялся
@@ -243,6 +258,20 @@ if [[ "$PROXY_CODE" == "404" ]]; then
     err "  причины: нет msc4512_enabled, lk-as.yaml не подключён и т.п. См. docs/LIVEKIT-AS-MODE-MSC4512.md"
 else
     ok "  MSC4512-прокси жив (HTTP ${PROXY_CODE}; сервис отвечает своей ошибкой - что и надо)"
+fi
+
+# MSC4502 is_joined: при включённом флаге отвечает {"joined":...} даже на несуществующую
+# комнату/юзера, при выключенном - 404 M_UNRECOGNIZED (роут не регистрируется).
+ISJ_RESP=$(curl -s --max-time 10 \
+    -H "Authorization: Bearer ${AS_T_FILE}" \
+    "https://${MATRIX_HOST}/_matrix/client/unstable/io.element.msc4502/rooms/!smoke:${DOMAIN}/is_joined?mxid=@smoke:${DOMAIN}" || true)
+if [[ "$ISJ_RESP" == *'"joined"'* ]]; then
+    ok "  MSC4502 is_joined жив (jwt-service >= 0.9 сможет проверять membership)"
+else
+    SMOKE_BAD=true
+    err "  is_joined НЕ работает: ${ISJ_RESP:-нет ответа}"
+    err "  причина: нет msc4502_enabled: true в experimental_features - без него jwt-service"
+    err "  >= 0.9 даёт 502 \"Unable to verify room membership\" на /sfu/get и /get_token"
 fi
 
 echo ""

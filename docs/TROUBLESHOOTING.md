@@ -208,7 +208,38 @@ journalctl -u matrix-livekit-server --no-pager | grep -iE "ICE|failed|disconnect
 
 ---
 
-## 7. Synapse "FederationDeniedError 403" в логах
+## 7. Element Call: `MatrixError [502] Unable to verify room membership`
+
+**Симптом:** после обновления звонки падают с `502 Unable to verify room membership`
+на `https://matrix.<domain>/livekit-jwt-service/sfu/get`. В логах
+`journalctl -u matrix-livekit-jwt-service`:
+`error checking room membership ... http status code 404`.
+
+**Причина:** lk-jwt-service **0.9.0** (security-fix) стал проверять membership на
+standalone-эндпоинтах через MSC4502 `/_matrix/client/unstable/io.element.msc4502/rooms/{id}/is_joined`.
+Synapse регистрирует этот роут только при `experimental_features.msc4502_enabled: true`
+(`synapse/rest/client/room_membership.py`) — без флага он отвечает 404 `M_UNRECOGNIZED`,
+что jwt-service и превращает в 502.
+
+**Диагностика (с сервера, as_token из `/var/matrix/synapse/config/lk-as.yaml`):**
+```bash
+curl -s -H "Authorization: Bearer $AS_TOKEN" \
+  "https://matrix.<domain>/_matrix/client/unstable/io.element.msc4502/rooms/!x:<domain>/is_joined?mxid=@x:<domain>"
+# {"joined":false} = всё ок;  404 M_UNRECOGNIZED = флаг выключен
+```
+
+**Решение:** добавить флаг и перезапустить Synapse:
+```yaml
+matrix_synapse_experimental_features_custom:
+  msc4512_enabled: true
+  msc4502_enabled: true
+```
+`tools/generate_vars.sh` и `tools/livekit-as-setup.sh` ставят оба флага автоматически;
+`tools/install-livekit-as.sh` валидирует их наличие и делает smoke is_joined.
+
+---
+
+## 8. Synapse "FederationDeniedError 403" в логах
 
 **Симптом:** WARNING/ERROR при старте synapse: `FederationDeniedError 403: Federation denied with matrix.org`.
 
@@ -227,7 +258,7 @@ Tradeoff: server-to-server federation сигнатур станет провер
 
 ---
 
-## 8. Element Admin показывает "Failed to load" для Synapse version / Rooms
+## 9. Element Admin показывает "Failed to load" для Synapse version / Rooms
 
 **Симптом:** Element Admin dashboard загружается, видит users (через MAS API), но **Synapse version** и **Rooms total** показывают "Failed to load".
 
@@ -237,7 +268,7 @@ Tradeoff: server-to-server federation сигнатур станет провер
 
 ---
 
-## 9. nginx warn `"ssl_stapling" ignored, no OCSP responder URL`
+## 10. nginx warn `"ssl_stapling" ignored, no OCSP responder URL`
 
 **Симптом:** при `nginx -s reload` или старте - много warnings про ssl_stapling.
 
@@ -247,7 +278,7 @@ Tradeoff: server-to-server federation сигнатур станет провер
 
 ---
 
-## 10. ntfy: Element Android/iOS не получает push-уведомления
+## 11. ntfy: Element Android/iOS не получает push-уведомления
 
 **Симптом:** в Element Android `Settings → Troubleshoot → Troubleshoot notifications` показывает
 "distributor: FCM" (а не ntfy), либо "no distributors available", либо уведомления не приходят
@@ -312,7 +343,7 @@ docker exec matrix-postgres psql -U matrix -d synapse \
 
 ---
 
-## 11. Хочу поднять ntfy на своём домене (например `push.example.com`)
+## 12. Хочу поднять ntfy на своём домене (например `push.example.com`)
 
 **Симптом:** по дефолту ntfy живёт на `ntfy.example.com`, но ты хочешь другое имя.
 

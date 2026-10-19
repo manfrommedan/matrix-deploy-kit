@@ -391,6 +391,7 @@ Wizard: ответь "y" на вопрос в секции 5 (Звонки → �
 ```yaml
 matrix_synapse_experimental_features_custom:
   msc4512_enabled: true
+  msc4502_enabled: true   # is_joined-эндпоинт; без него jwt-service >= 0.9 → 502 на /sfu/get
 
 # AS-режим есть с 0.7; latest = mdad сам держит образ свежим
 # (ghcr :latest = 0.7.0 на сегодня; self-build на arm при latest чеканит main)
