@@ -13,6 +13,11 @@
   `msc4502_enabled` вместе с `msc4512_enabled`; `tools/install-livekit-as.sh`
   валидирует оба флага в vars.yml и добавлен is_joined-smoke в оба скрипта.
   Кейс описан в `docs/TROUBLESHOOTING.md` (раздел 7).
+- **`vars_check_naming --strict` теперь реально возвращает ошибку** -
+  раньше функция после `die` доходила до `return 0`, и `update.sh`
+  продолжал обновление. Заодно check ловит удалённый в Synapse 1.164
+  `matrix_synapse_experimental_features_msc4222_enabled` (state_after включён
+  всегда) и подсказывает его убрать. Регрессионный тест в `tools/tests/test_lib.sh`.
 
 ### Added
 

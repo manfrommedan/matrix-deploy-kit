@@ -125,3 +125,16 @@ test_header_text_includes_arg() {
     out=$(header_text "TestHeader" 2>&1)
     [[ "$out" == *"TestHeader"* ]]
 }
+
+test_vars_check_naming_rejects_removed_msc4222() {
+    local file out rc
+    file=$(mktemp)
+    printf 'matrix_synapse_experimental_features_msc4222_enabled: true\n' >"$file"
+    set +e
+    out=$(vars_check_naming "$file" --strict 2>&1)
+    rc=$?
+    set -e
+    rm -f "$file"
+    assert_eq "$rc" 1 "removed MSC4222 variable must fail strict check"
+    assert_contains "$out" "state_after включён всегда"
+}

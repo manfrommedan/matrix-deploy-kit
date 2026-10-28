@@ -132,20 +132,25 @@ vars_check_naming() {
 
     local old_prefix_re='^matrix_(mautrix|hookshot|heisenbridge|appservice_(irc|discord)|beeper_linkedin|wechat|sms_bridge|steam_bridge|rustpush_bridge|postmoogle|mx_puppet_(groupme|steam)|meshtastic_relay)_[a-z0-9_]*:'
     local mas_old_re='^matrix_authentication_service_config_account_registration_token_required:'
+    local synapse_removed_re='^matrix_synapse_experimental_features_msc4222_enabled:'
     local -a bad=()
     local hit
     while IFS= read -r hit; do bad+=("$hit"); done \
         < <(grep -nE "$old_prefix_re" "$file" || true)
     while IFS= read -r hit; do bad+=("$hit"); done \
         < <(grep -nE "$mas_old_re" "$file" || true)
+    while IFS= read -r hit; do bad+=("$hit"); done \
+        < <(grep -nE "$synapse_removed_re" "$file" || true)
 
     if ((${#bad[@]} > 0)); then
-        err "В ${file} найдены переменные со старыми именами:"
+        err "В ${file} найдены удалённые переменные или переменные со старыми именами:"
         printf '    %s\n' "${bad[@]}" >&2
-        info "Замена: matrix_<имя>_* -> matrix_bridge_<имя>_*,"
-        info "        ..._account_registration_token_required -> ..._account_password_registration_token_required"
+        info "Для бриджей: matrix_<имя>_* -> matrix_bridge_<имя>_*,"
+        info "Для MAS: ..._account_registration_token_required -> ..._account_password_registration_token_required"
+        info "Удали matrix_synapse_experimental_features_msc4222_enabled: в Synapse 1.164+ state_after включён всегда"
         if [[ "$strict" == "--strict" ]]; then
-            die "Переименуй переменные в ${file} и повтори"
+            die "Исправь переменные в ${file} и повтори"
+            return 1
         fi
         warn "Плейбук их проигнорирует или остановится на validate_config"
     fi
